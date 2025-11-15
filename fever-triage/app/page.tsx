@@ -1,5 +1,48 @@
 "use client";
 
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
+import SymptomForm from '@/components/SymptomForm';
+import ResultsDisplay from '@/components/ResultsDisplay';
+import DemoCases from '@/components/DemoCases';
+import TemperatureTracker from '@/components/TemperatureTracker';
+import MedicineReminder from '@/components/MedicineReminder';
+import Chatbot from '@/components/Chatbot';
+import UserProfile from '@/components/UserProfile';
+import GoogleMapsLoader from '@/components/GoogleMapsLoader';
+import FindDoctors from '@/components/FindDoctors';
+import DailyAnalytics from '@/components/DailyAnalytics';
+import { PatientData, TriageResponse, submitTriageAssessment, APIError } from '@/lib/api';
+
+export default function Home() {
+  const searchParams = useSearchParams();
+  const [currentStep, setCurrentStep] = useState<'form' | 'results' | 'dashboard' | 'findDoctors' | 'analytics'>('form');
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState<TriageResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [demoData, setDemoData] = useState<Partial<PatientData> | null>(null);
+  const [showChatbot, setShowChatbot] = useState(false);
+  const [userProfile, setUserProfile] = useState<any>(null);
+  const [showProfileSetup, setShowProfileSetup] = useState(false);
+  const [googleMapsLoaded, setGoogleMapsLoaded] = useState(false);
+
+  useEffect(() => {
+    // Check for URL parameter to show find doctors
+    const findDoctorsParam = searchParams?.get('findDoctors');
+    if (findDoctorsParam === 'true') {
+      setCurrentStep('findDoctors');
+    }
+
+    // Check if user profile exists
+    const savedProfile = localStorage.getItem('userProfile');
+    const profileSkipped = localStorage.getItem('profileSkipped');
+    
+    if (savedProfile) {
+      setUserProfile(JSON.parse(savedProfile));
+    } else if (!profileSkipped) {
+      setShowProfileSetup(true);
+    }
+  }, [searchParams]);
 import { useState, useEffect } from "react";
 // import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -119,6 +162,79 @@ export default function Home() {
 		setShowProfileSetup(false);
 	};
 
+  return (
+    <GoogleMapsLoader>
+      {(loaded) => {
+        setGoogleMapsLoaded(loaded);
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+            <div className="container mx-auto px-4 py-8">
+        {/* Header */}
+        <header className="text-center mb-8">
+          <h1 className="text-4xl md:text-5xl font-bold text-blue-900 mb-4">
+            AI Fever Triage System
+          </h1>
+          <p className="text-lg text-blue-700 max-w-2xl mx-auto leading-relaxed">
+            Intelligent clinical decision support powered by AI. Get instant fever triage assessments 
+            based on clinical protocols and evidence-based medicine.
+          </p>
+          
+          {/* Navigation */}
+          <div className="flex justify-center space-x-4 mt-6">
+            <button
+              onClick={() => setCurrentStep('form')}
+              className={`px-4 py-2 rounded-md font-medium transition-colors ${
+                currentStep === 'form'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-blue-600 border border-blue-600 hover:bg-blue-50'
+              }`}
+            >
+              Assessment
+            </button>
+            <button
+              onClick={handleShowDashboard}
+              className={`px-4 py-2 rounded-md font-medium transition-colors ${
+                currentStep === 'dashboard'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-blue-600 border border-blue-600 hover:bg-blue-50'
+              }`}
+            >
+              Dashboard
+            </button>
+            <button
+              onClick={() => setCurrentStep('findDoctors')}
+              className={`px-4 py-2 rounded-md font-medium transition-colors ${
+                currentStep === 'findDoctors'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-blue-600 border border-blue-600 hover:bg-blue-50'
+              }`}
+            >
+              Find Doctors
+            </button>
+            <button
+              onClick={() => setCurrentStep('analytics')}
+              className={`px-4 py-2 rounded-md font-medium transition-colors ${
+                currentStep === 'analytics'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-blue-600 border border-blue-600 hover:bg-blue-50'
+              }`}
+            >
+              Daily Analytics
+            </button>
+            {results && (
+              <button
+                onClick={() => setCurrentStep('results')}
+                className={`px-4 py-2 rounded-md font-medium transition-colors ${
+                  currentStep === 'results'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white text-blue-600 border border-blue-600 hover:bg-blue-50'
+                }`}
+              >
+                Results
+              </button>
+            )}
+          </div>
+        </header>
 	// Show loading spinner while checking authentication
 	if (authLoading) {
 		return (
@@ -210,6 +326,90 @@ export default function Home() {
 					</div>
 				</header>
 
+              {/* Symptom Form */}
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-6 text-center">
+                  Patient Assessment Form
+                </h2>
+                <SymptomForm
+                  onSubmit={handleFormSubmit}
+                  loading={loading}
+                  initialData={demoData || undefined}
+                />
+              </div>
+            </div>
+          ) : currentStep === 'dashboard' ? (
+            <div className="space-y-6">
+              <div className="bg-white rounded-lg shadow-lg p-6">
+                <h2 className="text-2xl font-bold text-gray-900 mb-6 text-center">
+                  Patient Care Dashboard
+                </h2>
+                
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Temperature Tracker */}
+                  <div className="bg-gray-50 rounded-lg p-6">
+                    <TemperatureTracker />
+                  </div>
+                  
+                  {/* Medicine Reminder */}
+                  <div className="bg-gray-50 rounded-lg p-6">
+                    <MedicineReminder />
+                  </div>
+                </div>
+                
+                {/* Action Buttons */}
+                <div className="mt-8 text-center space-x-4">
+                  <button
+                    onClick={handleShowChatbot}
+                    className="bg-green-600 text-white px-6 py-3 rounded-md font-medium hover:bg-green-700 transition-colors"
+                  >
+                    Ask Health Questions
+                  </button>
+                  <button
+                    onClick={() => setCurrentStep('form')}
+                    className="bg-blue-600 text-white px-6 py-3 rounded-md font-medium hover:bg-blue-700 transition-colors"
+                  >
+                    New Assessment
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : currentStep === 'findDoctors' ? (
+            <FindDoctors googleMapsLoaded={googleMapsLoaded} />
+          ) : currentStep === 'analytics' ? (
+            <DailyAnalytics googleMapsLoaded={googleMapsLoaded} />
+          ) : (
+            <div className="bg-white rounded-lg shadow-lg p-8">
+              <h2 className="text-2xl font-bold text-gray-900 mb-6 text-center">
+                AI Triage Assessment Results
+              </h2>
+              {results && (
+                <div>
+                  <ResultsDisplay
+                    results={results}
+                    onStartNewAssessment={handleStartNewAssessment}
+                  />
+                  
+                  {/* Post-Assessment Actions */}
+                  <div className="mt-8 text-center space-x-4">
+                    <button
+                      onClick={handleShowChatbot}
+                      className="bg-green-600 text-white px-4 py-2 rounded-md font-medium hover:bg-green-700 transition-colors"
+                    >
+                      Ask Follow-up Questions
+                    </button>
+                    <button
+                      onClick={handleShowDashboard}
+                      className="bg-purple-600 text-white px-4 py-2 rounded-md font-medium hover:bg-purple-700 transition-colors"
+                    >
+                      Health Dashboard
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 				{/* Medical Disclaimer */}
 				<div className="bg-gray-50 border-l-4 border-gray-400 p-6 rounded-lg shadow-md mb-8 max-w-4xl mx-auto">
 					<div className="flex items-start">

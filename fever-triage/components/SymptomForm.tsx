@@ -2,27 +2,56 @@
 
 import { useState, useEffect } from 'react';
 import { PatientData } from '@/lib/api';
-
-const AVAILABLE_SYMPTOMS = [
-  'Headache', 'Cough', 'Sore Throat', 'Body Aches',
-  'Chills', 'Fatigue', 'Nausea', 'Vomiting',
-  'Diarrhea', 'Rash', 'Difficulty Breathing', 'Chest Pain',
-  'Stiff Neck', 'Confusion', 'Rapid Heartbeat', 'Dizziness',
-  'Abdominal Pain', 'Ear Pain', 'Joint Pain', 'Loss of Taste/Smell'
-];
-
-const FOOD_OPTIONS = [
-  'No appetite', 'Normal appetite', 'Increased appetite',
-  'Ate spicy food', 'Ate dairy products', 'Ate raw/undercooked food',
-  'Ate street food', 'Drank contaminated water', 'Had alcohol',
-  'Skipped meals', 'Only liquids', 'Solid foods'
-];
+import PhotoUpload from './PhotoUpload';
 
 interface SymptomFormProps {
-  onSubmit: (data: PatientData) => void;
+  onSubmit: (data: PatientData, photo?: File) => void;
   loading?: boolean;
   initialData?: Partial<PatientData>;
 }
+
+const AVAILABLE_SYMPTOMS = [
+  // General fever symptoms
+  'Headache', 'Body Aches', 'Fatigue', 'Chills', 'Night Sweats',
+  
+  // Dengue-specific
+  'Severe Joint Pain', 'Muscle Pain', 'Skin Rash', 'Easy Bruising',
+  
+  // Malaria-specific  
+  'Shivering Episodes', 'Sweating After Fever', 'Cyclical Fever Pattern',
+  
+  // Typhoid-specific
+  'Gradually Rising Fever', 'Abdominal Pain', 'Loss of Appetite',
+  
+  // Respiratory symptoms
+  'Cough', 'Sore Throat', 'Difficulty Breathing', 'Chest Pain', 'Productive Cough',
+  
+  // Gastro symptoms  
+  'Nausea', 'Vomiting', 'Diarrhea', 'Stomach Pain', 'Dehydration Signs',
+  
+  // Heat-related
+  'Heavy Sweating', 'Dizziness', 'Heat Exhaustion', 'Weakness',
+  
+  // Serious warning signs
+  'Confusion', 'Rapid Heartbeat', 'Low Blood Pressure', 'Persistent Vomiting',
+  
+  // Chickenpox/Skin related
+  'Itchy Blisters', 'Widespread Rash'
+];
+
+const FOOD_OPTIONS = [
+  // Appetite
+  'No appetite', 'Normal appetite',
+  
+  // High-risk foods (India-specific)
+  'Ate street food', 'Drank tap water', 'Ate outside food', 'Had ice/ice cream',
+  
+  // Diet patterns
+  'Only liquids', 'Skipped meals',
+  
+  // Specific risky foods
+  'Ate raw/undercooked food', 'Ate fruits/salads outside'
+];
 
 export default function SymptomForm({ onSubmit, loading = false, initialData }: SymptomFormProps) {
   const [formData, setFormData] = useState<PatientData>({
@@ -35,6 +64,7 @@ export default function SymptomForm({ onSubmit, loading = false, initialData }: 
 
   const [foodHistory, setFoodHistory] = useState<string[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [capturedPhoto, setCapturedPhoto] = useState<File | null>(null);
 
   const toggleFoodHistory = (food: string) => {
     if (foodHistory.includes(food)) {
@@ -76,7 +106,7 @@ export default function SymptomForm({ onSubmit, loading = false, initialData }: 
         medical_history: formData.medical_history + 
           (foodHistory.length > 0 ? `\n\nFood/Diet History: ${foodHistory.join(', ')}` : '')
       };
-      onSubmit(enhancedData);
+      onSubmit(enhancedData, capturedPhoto || undefined);
     }
   };
 
@@ -253,6 +283,19 @@ export default function SymptomForm({ onSubmit, loading = false, initialData }: 
           placeholder="Any relevant medical conditions, medications, or recent illnesses..."
           className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           disabled={loading}
+        />
+      </div>
+
+      {/* Photo Upload for Facial Analysis */}
+      <div className="mb-8">
+        <PhotoUpload 
+          onAnalysisComplete={(analysis) => {
+            console.log('Facial analysis completed:', analysis);
+          }}
+          onPhotoCapture={(photo) => {
+            setCapturedPhoto(photo);
+            console.log('Photo captured for comprehensive analysis');
+          }}
         />
       </div>
 

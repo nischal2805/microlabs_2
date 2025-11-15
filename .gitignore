@@ -17,6 +17,10 @@ dist/
 .env.test.local
 .env.production.local
 
+# Firebase
+serviceAccountKey.json
+*-firebase-adminsdk-*.json
+
 # Python
 __pycache__/
 *.py[cod]

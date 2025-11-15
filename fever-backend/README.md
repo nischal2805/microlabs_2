@@ -1,4 +1,4 @@
-# AI Fever Triage System - Backend
+=# AI Fever Triage System - Backend
 
 A FastAPI-based backend service that provides AI-powered fever triage assessments using OpenAI's GPT-4.
 

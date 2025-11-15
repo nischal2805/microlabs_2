@@ -54,12 +54,29 @@ class PatientData(BaseModel):
     symptoms: List[str] = Field(..., description="List of symptoms")
     age: int = Field(..., ge=0, le=120, description="Patient age in years")
     medical_history: Optional[str] = Field(None, description="Optional medical history")
+    photo_base64: Optional[str] = Field(None, description="Base64 encoded patient photo")
+    photo_url: Optional[str] = Field(None, description="URL to patient photo")
+    location: Optional[str] = Field(None, description="Patient location (city, state)")
 
     @validator('temperature')
     def validate_temperature(cls, v):
         if v < 95.0 or v > 110.0:
             raise ValueError('Temperature must be between 95.0 and 110.0 Fahrenheit')
         return v
+
+class MedicationRecommendation(BaseModel):
+    name: str = Field(..., description="Medication name")
+    manufacturer: str = Field(default="Microlabs", description="Manufacturer")
+    dosage: str = Field(..., description="Recommended dosage")
+    frequency: str = Field(..., description="How often to take")
+    purpose: str = Field(..., description="What it treats")
+
+class DoctorRecommendation(BaseModel):
+    name: str = Field(..., description="Doctor name")
+    specialty: str = Field(..., description="Medical specialty")
+    phone: str = Field(..., description="Contact phone number")
+    address: str = Field(..., description="Clinic/Hospital address")
+    distance: Optional[str] = Field(None, description="Distance from patient")
 
 class TriageResponse(BaseModel):
     severity: str = Field(..., description="Severity level: LOW/MEDIUM/HIGH/CRITICAL")
@@ -68,6 +85,10 @@ class TriageResponse(BaseModel):
     clinical_explanation: str = Field(..., description="Clinical reasoning and explanation")
     red_flags: List[str] = Field(..., description="List of concerning symptoms/signs")
     confidence_score: float = Field(..., ge=0.0, le=1.0, description="AI confidence score")
+    medications: List[MedicationRecommendation] = Field(default=[], description="Microlabs medication recommendations")
+    doctors: List[DoctorRecommendation] = Field(default=[], description="Nearby doctors")
+    emergency_contacts: List[str] = Field(default=[], description="Emergency contact numbers")
+    photo_analysis: Optional[str] = Field(None, description="Analysis of patient photo if provided")
 
 class ChatMessage(BaseModel):
     message: str = Field(..., description="User's question or message")
@@ -77,8 +98,142 @@ class ChatResponse(BaseModel):
     response: str = Field(..., description="AI response to user question")
     suggestions: List[str] = Field(default=[], description="Suggested follow-up questions")
 
+# India-specific doctor database (mock data - in production, use real database)
+INDIA_DOCTORS_DB = {
+    "mumbai": [
+        {"name": "Dr. Rajesh Kumar", "specialty": "General Physician", "phone": "+91-22-2345-6789", "address": "Apollo Hospital, Tardeo, Mumbai"},
+        {"name": "Dr. Priya Sharma", "specialty": "Infectious Disease Specialist", "phone": "+91-22-2456-7890", "address": "Lilavati Hospital, Bandra, Mumbai"},
+        {"name": "Dr. Amit Patel", "specialty": "Pediatrician", "phone": "+91-22-2567-8901", "address": "KEM Hospital, Parel, Mumbai"},
+    ],
+    "delhi": [
+        {"name": "Dr. Sandeep Singh", "specialty": "General Physician", "phone": "+91-11-4567-8901", "address": "AIIMS, Ansari Nagar, Delhi"},
+        {"name": "Dr. Meera Verma", "specialty": "Infectious Disease Specialist", "phone": "+91-11-5678-9012", "address": "Max Hospital, Saket, Delhi"},
+        {"name": "Dr. Vikram Malhotra", "specialty": "Internal Medicine", "phone": "+91-11-6789-0123", "address": "Fortis Hospital, Vasant Kunj, Delhi"},
+    ],
+    "bangalore": [
+        {"name": "Dr. Anand Rao", "specialty": "General Physician", "phone": "+91-80-1234-5678", "address": "Manipal Hospital, HAL Airport Road, Bangalore"},
+        {"name": "Dr. Lakshmi Menon", "specialty": "Infectious Disease Specialist", "phone": "+91-80-2345-6789", "address": "Apollo Hospital, Bannerghatta Road, Bangalore"},
+        {"name": "Dr. Suresh Reddy", "specialty": "Family Medicine", "phone": "+91-80-3456-7890", "address": "Columbia Asia Hospital, Whitefield, Bangalore"},
+    ],
+    "chennai": [
+        {"name": "Dr. Karthik Subramanian", "specialty": "General Physician", "phone": "+91-44-1234-5678", "address": "Apollo Hospital, Greams Road, Chennai"},
+        {"name": "Dr. Divya Ramesh", "specialty": "Infectious Disease Specialist", "phone": "+91-44-2345-6789", "address": "MIOT Hospital, Manapakkam, Chennai"},
+        {"name": "Dr. Venkat Krishnan", "specialty": "Internal Medicine", "phone": "+91-44-3456-7890", "address": "Fortis Malar Hospital, Adyar, Chennai"},
+    ],
+    "pune": [
+        {"name": "Dr. Nikhil Joshi", "specialty": "General Physician", "phone": "+91-20-1234-5678", "address": "Ruby Hall Clinic, Pune"},
+        {"name": "Dr. Sneha Deshmukh", "specialty": "Infectious Disease Specialist", "phone": "+91-20-2345-6789", "address": "Sahyadri Hospital, Deccan, Pune"},
+        {"name": "Dr. Rahul Bhosale", "specialty": "Family Medicine", "phone": "+91-20-3456-7890", "address": "Deenanath Mangeshkar Hospital, Pune"},
+    ],
+    "hyderabad": [
+        {"name": "Dr. Srinivas Rao", "specialty": "General Physician", "phone": "+91-40-1234-5678", "address": "Apollo Hospital, Jubilee Hills, Hyderabad"},
+        {"name": "Dr. Kavitha Reddy", "specialty": "Infectious Disease Specialist", "phone": "+91-40-2345-6789", "address": "Yashoda Hospital, Somajiguda, Hyderabad"},
+        {"name": "Dr. Ramesh Naidu", "specialty": "Internal Medicine", "phone": "+91-40-3456-7890", "address": "KIMS Hospital, Secunderabad, Hyderabad"},
+    ],
+}
+
+# Emergency numbers for India
+INDIA_EMERGENCY_CONTACTS = {
+    "national": ["108 - National Ambulance Service", "102 - National Health Helpline"],
+    "mumbai": ["108 - Ambulance", "1916 - Medical Helpline"],
+    "delhi": ["108 - Ambulance", "011-23921801 - Delhi Medical Emergency"],
+    "bangalore": ["108 - Ambulance", "080-22261000 - BBMP Health Helpline"],
+    "chennai": ["108 - Ambulance", "044-28592750 - Chennai Corporation Health"],
+    "pune": ["108 - Ambulance", "020-26127394 - PMC Health Helpline"],
+    "hyderabad": ["108 - Ambulance", "040-23814939 - GHMC Health Helpline"],
+}
+
+# Microlabs medication database for fever and related conditions
+MICROLABS_MEDICATIONS = {
+    "fever_reducer": [
+        {"name": "Paracetamol 500mg (Microlabs)", "dosage": "500-1000mg", "frequency": "Every 4-6 hours", "purpose": "Reduce fever and pain"},
+        {"name": "Ibuprofen 400mg (Microlabs)", "dosage": "400mg", "frequency": "Every 6-8 hours", "purpose": "Reduce fever and inflammation"},
+    ],
+    "antibiotic": [
+        {"name": "Amoxicillin 500mg (Microlabs)", "dosage": "500mg", "frequency": "Three times daily", "purpose": "Bacterial infections"},
+        {"name": "Azithromycin 500mg (Microlabs)", "dosage": "500mg", "frequency": "Once daily", "purpose": "Bacterial respiratory infections"},
+    ],
+    "antihistamine": [
+        {"name": "Cetirizine 10mg (Microlabs)", "dosage": "10mg", "frequency": "Once daily", "purpose": "Allergic reactions and symptoms"},
+    ],
+    "cough": [
+        {"name": "Dextromethorphan Syrup (Microlabs)", "dosage": "10ml", "frequency": "Three times daily", "purpose": "Cough suppression"},
+    ],
+    "decongestant": [
+        {"name": "Pseudoephedrine 60mg (Microlabs)", "dosage": "60mg", "frequency": "Every 6 hours", "purpose": "Nasal congestion relief"},
+    ],
+}
+
+def get_doctors_by_location(location: Optional[str]) -> List[DoctorRecommendation]:
+    """Get doctor recommendations based on location"""
+    if not location:
+        # Return default doctors from major cities
+        default_doctors = []
+        for city in ["mumbai", "delhi", "bangalore"]:
+            if city in INDIA_DOCTORS_DB:
+                default_doctors.extend(INDIA_DOCTORS_DB[city][:1])
+        return [DoctorRecommendation(**doc) for doc in default_doctors]
+    
+    # Normalize location
+    location_lower = location.lower()
+    
+    # Find matching city
+    for city, doctors in INDIA_DOCTORS_DB.items():
+        if city in location_lower:
+            return [DoctorRecommendation(**doc) for doc in doctors]
+    
+    # If no match, return default
+    return [DoctorRecommendation(**doc) for doc in INDIA_DOCTORS_DB.get("mumbai", [])[:2]]
+
+def get_emergency_contacts(location: Optional[str]) -> List[str]:
+    """Get emergency contact numbers based on location"""
+    contacts = INDIA_EMERGENCY_CONTACTS["national"].copy()
+    
+    if location:
+        location_lower = location.lower()
+        for city, city_contacts in INDIA_EMERGENCY_CONTACTS.items():
+            if city in location_lower and city != "national":
+                contacts.extend(city_contacts)
+                break
+    
+    return contacts
+
+def get_medication_recommendations(severity: str, symptoms: List[str]) -> List[MedicationRecommendation]:
+    """Get Microlabs medication recommendations based on severity and symptoms"""
+    medications = []
+    
+    # Always recommend fever reducer
+    medications.extend(MICROLABS_MEDICATIONS["fever_reducer"])
+    
+    # Add based on severity
+    if severity in ["HIGH", "CRITICAL"]:
+        # Note: Antibiotics should only be prescribed by doctors
+        medications.append(
+            MedicationRecommendation(
+                name="Prescription Antibiotic (Microlabs)",
+                manufacturer="Microlabs",
+                dosage="As prescribed by doctor",
+                frequency="As prescribed by doctor",
+                purpose="Bacterial infection (prescription required)"
+            )
+        )
+    
+    # Add based on symptoms
+    symptom_keywords = [s.lower() for s in symptoms]
+    
+    if any(word in " ".join(symptom_keywords) for word in ["cough", "throat"]):
+        medications.extend(MICROLABS_MEDICATIONS["cough"])
+    
+    if any(word in " ".join(symptom_keywords) for word in ["congestion", "runny nose", "blocked nose"]):
+        medications.extend(MICROLABS_MEDICATIONS["decongestant"])
+    
+    if any(word in " ".join(symptom_keywords) for word in ["allergy", "allergic", "rash", "itching"]):
+        medications.extend(MICROLABS_MEDICATIONS["antihistamine"])
+    
+    return medications
+
 def create_system_prompt() -> str:
-    return """You are a clinical decision support AI specializing in emergency medicine, infectious diseases, and fever triage. 
+    return """You are a clinical decision support AI specializing in emergency medicine, infectious diseases, and fever triage for patients in India. 
 
 Your role is to:
 - Use evidence-based medicine principles
@@ -88,6 +243,9 @@ Your role is to:
 - Identify life-threatening conditions immediately
 - Provide differential diagnoses ranked by probability
 - Consider age-specific considerations
+- Analyze patient photos when provided for visual symptoms
+- Recommend medications manufactured by Microlabs (Indian pharmaceutical company)
+- Consider India-specific health conditions and epidemiology
 
 Clinical Guidelines:
 - LOW severity: Common viral infections, self-care appropriate, typically temp <101°F
@@ -104,11 +262,20 @@ Red Flag Symptoms (require immediate attention):
 - Severe dehydration
 - Temperature >104°F (40°C)
 
+India-Specific Considerations:
+- Common tropical diseases: Dengue, Malaria, Typhoid
+- Monsoon-related infections
+- Vector-borne diseases prevalence
+- Access to healthcare facilities
+- Medication availability in India
+
 Always return a properly formatted JSON response with all required fields. Be thorough but concise in your clinical reasoning."""
 
 def create_user_prompt(patient_data: PatientData) -> str:
     symptoms_str = ", ".join(patient_data.symptoms) if patient_data.symptoms else "None reported"
     history_str = patient_data.medical_history if patient_data.medical_history else "Not provided"
+    location_str = patient_data.location if patient_data.location else "Not specified"
+    photo_info = "Patient photo provided for visual analysis" if (patient_data.photo_base64 or patient_data.photo_url) else "No photo provided"
     
     return f"""Please assess this patient and provide a structured triage recommendation:
 
@@ -118,14 +285,17 @@ PATIENT PRESENTATION:
 - Fever duration: {patient_data.duration_hours} hours
 - Symptoms: {symptoms_str}
 - Medical history: {history_str}
+- Location: {location_str} (India)
+- Visual information: {photo_info}
 
 REQUESTED ANALYSIS:
 1. Severity classification (LOW/MEDIUM/HIGH/CRITICAL)
-2. Differential diagnoses ranked by probability
+2. Differential diagnoses ranked by probability (consider India-specific diseases)
 3. Specific red flags to monitor
 4. Recommended care setting and urgency
 5. Patient-friendly explanation of condition
 6. Confidence level in assessment
+7. If photo provided, analyze visible symptoms (rash, skin condition, etc.)
 
 Please provide your response in the following JSON format:
 {{
@@ -134,16 +304,20 @@ Please provide your response in the following JSON format:
     "recommended_action": "Clear, actionable recommendation for patient",
     "clinical_explanation": "Professional explanation of reasoning and assessment",
     "red_flags": ["Specific warning signs to watch for"],
-    "confidence_score": 0.85
+    "confidence_score": 0.85,
+    "photo_analysis": "Analysis of visual symptoms if photo provided, or null"
 }}"""
 
-async def call_gemini_api(system_prompt: str, user_prompt: str) -> str:
-    """Call Google Gemini API"""
+async def call_gemini_api(system_prompt: str, user_prompt: str, image_base64: Optional[str] = None) -> str:
+    """Call Google Gemini API with optional image support"""
     if not GEMINI_API_KEY:
         raise Exception("Gemini API key not configured")
     
     logger.info(f"Using Gemini API key: {GEMINI_API_KEY[:20]}...")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    
+    # Use gemini-pro-vision if image is provided, otherwise gemini-pro
+    model = "gemini-2.0-flash" if not image_base64 else "gemini-2.0-flash"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
     
     # Format the prompt for Gemini
     combined_prompt = f"""You are a clinical decision support AI. Please analyze this patient case and respond with a JSON object only.
@@ -159,18 +333,29 @@ Please respond with ONLY a valid JSON object with these exact fields:
     "recommended_action": "Clear action recommendation",
     "clinical_explanation": "Professional medical explanation",
     "red_flags": ["Warning sign 1", "Warning sign 2"],
-    "confidence_score": 0.85
+    "confidence_score": 0.85,
+    "photo_analysis": "Visual analysis if photo provided, or null"
 }}"""
+
+    # Build parts array
+    parts = [{"text": combined_prompt}]
+    
+    # Add image if provided
+    if image_base64:
+        parts.append({
+            "inline_data": {
+                "mime_type": "image/jpeg",
+                "data": image_base64
+            }
+        })
 
     payload = {
         "contents": [{
-            "parts": [{
-                "text": combined_prompt
-            }]
+            "parts": parts
         }],
         "generationConfig": {
             "temperature": 0.3,
-            "maxOutputTokens": 1500,
+            "maxOutputTokens": 2000,
         }
     }
     
@@ -296,7 +481,7 @@ async def get_fallback_response(patient_data: PatientData) -> TriageResponse:
         severity = "CRITICAL"
         red_flags = ["High fever", "Concerning symptoms present"]
         diagnoses = ["Possible serious infection", "Requires immediate evaluation"]
-        action = "Seek immediate emergency care - call 911"
+        action = "Seek immediate emergency care - call 108 (National Ambulance Service)"
     
     # High severity
     elif temp >= 103.0 or age > 65 or "rapid heartbeat" in symptoms:
@@ -311,13 +496,22 @@ async def get_fallback_response(patient_data: PatientData) -> TriageResponse:
         diagnoses = ["Viral infection", "Flu", "Upper respiratory infection"]
         action = "See healthcare provider within 24-48 hours if no improvement"
     
+    # Get location-based recommendations
+    doctors = get_doctors_by_location(patient_data.location)
+    emergency_contacts = get_emergency_contacts(patient_data.location)
+    medications = get_medication_recommendations(severity, patient_data.symptoms)
+    
     return TriageResponse(
         severity=severity,
         diagnosis_suggestions=diagnoses,
         recommended_action=action,
         clinical_explanation=f"Rule-based assessment: Temperature {temp}°F, {len(symptoms)} symptoms. This is a simplified assessment - please consult healthcare provider for proper evaluation.",
         red_flags=red_flags,
-        confidence_score=0.6  # Lower confidence for rule-based
+        confidence_score=0.6,  # Lower confidence for rule-based
+        medications=medications,
+        doctors=doctors,
+        emergency_contacts=emergency_contacts,
+        photo_analysis=None
     )
 
 async def get_ai_triage_assessment(patient_data: PatientData) -> TriageResponse:
@@ -335,7 +529,7 @@ async def get_ai_triage_assessment(patient_data: PatientData) -> TriageResponse:
         try:
             if AI_PROVIDER == "gemini" and GEMINI_API_KEY:
                 logger.info("Trying Gemini API")
-                response_content = await call_gemini_api(system_prompt, user_prompt)
+                response_content = await call_gemini_api(system_prompt, user_prompt, patient_data.photo_base64)
             elif AI_PROVIDER == "ollama":
                 logger.info("Trying Ollama API")
                 response_content = await call_ollama_api(system_prompt, user_prompt)
@@ -362,7 +556,7 @@ async def get_ai_triage_assessment(patient_data: PatientData) -> TriageResponse:
                     logger.info(f"Trying fallback provider: {provider}")
                     
                     if provider == "gemini" and GEMINI_API_KEY:
-                        response_content = await call_gemini_api(system_prompt, user_prompt)
+                        response_content = await call_gemini_api(system_prompt, user_prompt, patient_data.photo_base64)
                         break
                     elif provider == "ollama":
                         response_content = await call_ollama_api(system_prompt, user_prompt)
@@ -398,14 +592,26 @@ async def get_ai_triage_assessment(patient_data: PatientData) -> TriageResponse:
             logger.warning("Could not parse JSON, using fallback response")
             return await get_fallback_response(patient_data)
         
+        # Get location-based recommendations
+        doctors = get_doctors_by_location(patient_data.location)
+        emergency_contacts = get_emergency_contacts(patient_data.location)
+        
+        # Get medication recommendations
+        severity = ai_assessment.get("severity", "MEDIUM")
+        medications = get_medication_recommendations(severity, patient_data.symptoms)
+        
         # Validate and create response object
         triage_response = TriageResponse(
-            severity=ai_assessment.get("severity", "MEDIUM"),
+            severity=severity,
             diagnosis_suggestions=ai_assessment.get("diagnosis_suggestions", ["Unable to determine"]),
             recommended_action=ai_assessment.get("recommended_action", "Consult healthcare provider"),
             clinical_explanation=ai_assessment.get("clinical_explanation", "Assessment completed"),
             red_flags=ai_assessment.get("red_flags", []),
-            confidence_score=float(ai_assessment.get("confidence_score", 0.7))
+            confidence_score=float(ai_assessment.get("confidence_score", 0.7)),
+            medications=medications,
+            doctors=doctors,
+            emergency_contacts=emergency_contacts,
+            photo_analysis=ai_assessment.get("photo_analysis")
         )
         
         logger.info(f"Successfully processed assessment with severity: {triage_response.severity}")

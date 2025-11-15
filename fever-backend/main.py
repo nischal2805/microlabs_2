@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
 from typing import List, Optional
@@ -7,6 +7,9 @@ import json
 import logging
 import asyncio
 import httpx
+import base64
+import io
+from PIL import Image
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -18,8 +21,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="AI Fever Triage System",
-    description="AI-powered fever diagnostics and triage system using GPT-4",
-    version="1.0.0"
+    description="AI-powered fever diagnostics and triage system using Gemini AI",
+    version="2.0.0"
 )
 
 # CORS configuration
@@ -31,21 +34,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# AI Provider configuration
-AI_PROVIDER = os.getenv("AI_PROVIDER", "gemini")  # Options: openai, gemini, ollama, huggingface
+# Gemini API configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
 
-# Initialize clients based on provider
-openai_client = None
-if OPENAI_API_KEY:
-    try:
-        from openai import OpenAI
-        openai_client = OpenAI(api_key=OPENAI_API_KEY)
-    except ImportError:
-        logger.warning("OpenAI library not available")
+if not GEMINI_API_KEY:
+    logger.warning("GEMINI_API_KEY not configured. Please add it to your .env file")
 
 # Pydantic models
 class PatientData(BaseModel):
@@ -77,6 +70,27 @@ class ChatResponse(BaseModel):
     response: str = Field(..., description="AI response to user question")
     suggestions: List[str] = Field(default=[], description="Suggested follow-up questions")
 
+class FacialAnalysisResponse(BaseModel):
+    fatigue_indicators: List[str] = Field(..., description="Observed fatigue indicators from facial analysis")
+    fever_indicators: List[str] = Field(..., description="Observed fever indicators from facial analysis")
+    overall_health_appearance: str = Field(..., description="General health assessment from appearance")
+    confidence_score: float = Field(..., ge=0.0, le=1.0, description="Confidence in facial analysis")
+    recommendations: List[str] = Field(..., description="Additional recommendations based on appearance")
+
+class EnhancedPatientData(BaseModel):
+    temperature: float = Field(..., ge=95.0, le=110.0, description="Temperature in Fahrenheit")
+    duration_hours: int = Field(..., ge=1, le=720, description="Duration of fever in hours")
+    symptoms: List[str] = Field(..., description="List of symptoms")
+    age: int = Field(..., ge=0, le=120, description="Patient age in years")
+    medical_history: Optional[str] = Field(None, description="Optional medical history")
+    facial_analysis: Optional[FacialAnalysisResponse] = Field(None, description="Results from facial photo analysis")
+
+    @validator('temperature')
+    def validate_temperature(cls, v):
+        if v < 95.0 or v > 110.0:
+            raise ValueError('Temperature must be between 95.0 and 110.0 Fahrenheit')
+        return v
+
 def create_system_prompt() -> str:
     return """You are a clinical decision support AI specializing in emergency medicine, infectious diseases, and fever triage. 
 
@@ -106,9 +120,22 @@ Red Flag Symptoms (require immediate attention):
 
 Always return a properly formatted JSON response with all required fields. Be thorough but concise in your clinical reasoning."""
 
-def create_user_prompt(patient_data: PatientData) -> str:
+def create_user_prompt(patient_data, facial_analysis=None) -> str:
     symptoms_str = ", ".join(patient_data.symptoms) if patient_data.symptoms else "None reported"
     history_str = patient_data.medical_history if patient_data.medical_history else "Not provided"
+    
+    # Add facial analysis information if available
+    facial_info = ""
+    if facial_analysis and facial_analysis.confidence_score > 0.3:
+        fatigue_str = ", ".join(facial_analysis.fatigue_indicators) if facial_analysis.fatigue_indicators else "None observed"
+        fever_str = ", ".join(facial_analysis.fever_indicators) if facial_analysis.fever_indicators else "None observed"
+        facial_info = f"""
+FACIAL ANALYSIS RESULTS:
+- Fatigue indicators: {fatigue_str}
+- Fever indicators: {fever_str}
+- Overall appearance: {facial_analysis.overall_health_appearance}
+- Analysis confidence: {facial_analysis.confidence_score:.2f}
+"""
     
     return f"""Please assess this patient and provide a structured triage recommendation:
 
@@ -117,7 +144,7 @@ PATIENT PRESENTATION:
 - Temperature: {patient_data.temperature}°F
 - Fever duration: {patient_data.duration_hours} hours
 - Symptoms: {symptoms_str}
-- Medical history: {history_str}
+- Medical history: {history_str}{facial_info}
 
 REQUESTED ANALYSIS:
 1. Severity classification (LOW/MEDIUM/HIGH/CRITICAL)
@@ -142,7 +169,7 @@ async def call_gemini_api(system_prompt: str, user_prompt: str) -> str:
     if not GEMINI_API_KEY:
         raise Exception("Gemini API key not configured")
     
-    logger.info(f"Using Gemini API key: {GEMINI_API_KEY[:20]}...")
+    logger.info("Calling Gemini API for triage assessment")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
     
     # Format the prompt for Gemini
@@ -177,103 +204,38 @@ Please respond with ONLY a valid JSON object with these exact fields:
     async with httpx.AsyncClient(timeout=30.0) as client:
         # Try up to 3 times with exponential backoff for rate limiting
         for attempt in range(3):
-            response = await client.post(url, json=payload)
-            
-            if response.status_code == 200:
-                result = response.json()
-                logger.info(f"Gemini API response successful on attempt {attempt + 1}")
+            try:
+                response = await client.post(url, json=payload)
                 
-                if "candidates" not in result or not result["candidates"]:
-                    raise Exception("No candidates in Gemini response")
+                if response.status_code == 200:
+                    result = response.json()
+                    logger.info(f"Gemini API response successful on attempt {attempt + 1}")
                     
-                return result["candidates"][0]["content"]["parts"][0]["text"]
+                    if "candidates" not in result or not result["candidates"]:
+                        raise Exception("No candidates in Gemini response")
+                        
+                    return result["candidates"][0]["content"]["parts"][0]["text"]
+                
+                elif response.status_code == 429:  # Rate limited
+                    wait_time = (2 ** attempt) + 1  # Exponential backoff: 2, 5, 9 seconds
+                    logger.warning(f"Rate limited, waiting {wait_time} seconds before retry {attempt + 1}/3")
+                    await asyncio.sleep(wait_time)
+                    continue
+                
+                else:
+                    error_text = response.text
+                    logger.error(f"Gemini API error {response.status_code}: {error_text}")
+                    raise Exception(f"Gemini API error: {response.status_code} - {error_text}")
             
-            elif response.status_code == 429:  # Rate limited
-                wait_time = (2 ** attempt) + 1  # Exponential backoff: 2, 5, 9 seconds
-                logger.warning(f"Rate limited, waiting {wait_time} seconds before retry {attempt + 1}/3")
-                await asyncio.sleep(wait_time)
+            except httpx.TimeoutException:
+                logger.warning(f"Timeout on attempt {attempt + 1}/3")
+                if attempt == 2:  # Last attempt
+                    raise Exception("Gemini API timeout after 3 attempts")
+                await asyncio.sleep(2)
                 continue
-            
-            else:
-                error_text = response.text
-                logger.error(f"Gemini API error {response.status_code}: {error_text}")
-                raise Exception(f"Gemini API error: {response.status_code} - {error_text}")
         
         # If all retries failed
-        raise Exception("Gemini API failed after 3 retries (rate limited)")
-
-async def call_ollama_api(system_prompt: str, user_prompt: str) -> str:
-    """Call Ollama API (local)"""
-    url = f"{OLLAMA_URL}/api/generate"
-    
-    payload = {
-        "model": "llama3.2",  # You can change this to any available model
-        "prompt": f"{system_prompt}\n\n{user_prompt}\n\nPlease respond in JSON format.",
-        "stream": False,
-        "options": {
-            "temperature": 0.3,
-            "num_predict": 1500
-        }
-    }
-    
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(url, json=payload)
-        response.raise_for_status()
-        
-        result = response.json()
-        return result["response"]
-
-async def call_huggingface_api(system_prompt: str, user_prompt: str) -> str:
-    """Call Hugging Face Inference API"""
-    if not HUGGINGFACE_API_KEY:
-        raise Exception("Hugging Face API key not configured")
-    
-    # Using a free model that's good for text generation
-    url = "https://api-inference.huggingface.co/models/microsoft/DialoGPT-large"
-    
-    headers = {"Authorization": f"Bearer {HUGGINGFACE_API_KEY}"}
-    payload = {
-        "inputs": f"{system_prompt}\n\n{user_prompt}\n\nResponse in JSON:",
-        "parameters": {
-            "temperature": 0.3,
-            "max_new_tokens": 1500,
-            "return_full_text": False
-        }
-    }
-    
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, headers=headers, json=payload)
-        response.raise_for_status()
-        
-        result = response.json()
-        return result[0]["generated_text"] if result else "Unable to generate response"
-
-async def call_openai_api(system_prompt: str, user_prompt: str) -> str:
-    """Call OpenAI API"""
-    if not openai_client:
-        raise Exception("OpenAI not configured")
-    
-    models_to_try = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
-    
-    for model in models_to_try:
-        try:
-            logger.info(f"Trying OpenAI model: {model}")
-            response = openai_client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.3,
-                max_tokens=1500,
-                response_format={"type": "json_object"} if model != "gpt-3.5-turbo" else None
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            logger.warning(f"OpenAI model {model} failed: {e}")
-            continue
-    
-    raise Exception("All OpenAI models failed")
+        raise Exception("Gemini API failed after 3 retries")
 
 async def get_fallback_response(patient_data: PatientData) -> TriageResponse:
     """Generate a rule-based fallback response when AI is not available"""
@@ -320,67 +282,16 @@ async def get_fallback_response(patient_data: PatientData) -> TriageResponse:
         confidence_score=0.6  # Lower confidence for rule-based
     )
 
-async def get_ai_triage_assessment(patient_data: PatientData) -> TriageResponse:
-    """Get AI-powered triage assessment using multiple providers"""
+async def get_ai_triage_assessment(patient_data, facial_analysis=None) -> TriageResponse:
+    """Get AI-powered triage assessment using Gemini"""
     try:
         system_prompt = create_system_prompt()
-        user_prompt = create_user_prompt(patient_data)
+        user_prompt = create_user_prompt(patient_data, facial_analysis)
         
         logger.info(f"Requesting AI assessment for patient: age {patient_data.age}, temp {patient_data.temperature}°F")
-        logger.info(f"Using AI provider: {AI_PROVIDER}")
         
-        # Try different AI providers
-        response_content = None
-        
-        try:
-            if AI_PROVIDER == "gemini" and GEMINI_API_KEY:
-                logger.info("Trying Gemini API")
-                response_content = await call_gemini_api(system_prompt, user_prompt)
-            elif AI_PROVIDER == "ollama":
-                logger.info("Trying Ollama API")
-                response_content = await call_ollama_api(system_prompt, user_prompt)
-            elif AI_PROVIDER == "huggingface" and HUGGINGFACE_API_KEY:
-                logger.info("Trying Hugging Face API")
-                response_content = await call_huggingface_api(system_prompt, user_prompt)
-            elif AI_PROVIDER == "openai" and openai_client:
-                logger.info("Trying OpenAI API")
-                response_content = await call_openai_api(system_prompt, user_prompt)
-            else:
-                raise Exception(f"AI provider {AI_PROVIDER} not configured")
-        
-        except Exception as primary_error:
-            logger.warning(f"Primary AI provider failed: {primary_error}")
-            
-            # Try fallback providers
-            fallback_providers = ["gemini", "ollama", "huggingface", "openai"]
-            
-            for provider in fallback_providers:
-                if provider == AI_PROVIDER:
-                    continue
-                    
-                try:
-                    logger.info(f"Trying fallback provider: {provider}")
-                    
-                    if provider == "gemini" and GEMINI_API_KEY:
-                        response_content = await call_gemini_api(system_prompt, user_prompt)
-                        break
-                    elif provider == "ollama":
-                        response_content = await call_ollama_api(system_prompt, user_prompt)
-                        break
-                    elif provider == "huggingface" and HUGGINGFACE_API_KEY:
-                        response_content = await call_huggingface_api(system_prompt, user_prompt)
-                        break
-                    elif provider == "openai" and openai_client:
-                        response_content = await call_openai_api(system_prompt, user_prompt)
-                        break
-                        
-                except Exception as fallback_error:
-                    logger.warning(f"Fallback provider {provider} failed: {fallback_error}")
-                    continue
-        
-        if not response_content:
-            logger.warning("All AI providers failed, using fallback response")
-            return await get_fallback_response(patient_data)
+        # Call Gemini API
+        response_content = await call_gemini_api(system_prompt, user_prompt)
         
         logger.info(f"Received AI response: {response_content[:200]}...")
         
@@ -421,7 +332,7 @@ async def call_gemini_chat(system_prompt: str, user_prompt: str) -> str:
     if not GEMINI_API_KEY:
         raise Exception("Gemini API key not configured")
     
-    logger.info(f"Using Gemini API key: {GEMINI_API_KEY[:20]}...")
+    logger.info("Calling Gemini API for chat")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
     
     # Format the prompt for Gemini chat
@@ -443,77 +354,8 @@ Please provide a helpful, conversational response. Keep it friendly but professi
         }
     }
     
-    async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
-        await asyncio.sleep(1)  # Rate limiting for Gemini
-        response = await client.post(url, json=payload)
-        
-        if response.status_code != 200:
-            error_text = response.text
-            logger.error(f"Gemini chat API error {response.status_code}: {error_text}")
-            raise Exception(f"Gemini chat API error: {response.status_code}")
-        
-        result = response.json()
-        logger.info(f"Gemini chat API response: {result}")
-        
-        if "candidates" not in result or not result["candidates"]:
-            raise Exception("No candidates in Gemini chat response")
-            
-        return result["candidates"][0]["content"]["parts"][0]["text"]
-
-async def get_chat_response(system_prompt: str, user_prompt: str) -> str:
-    """Get AI response for chat messages"""
-    try:
-        # Try Gemini first if configured
-        if GEMINI_API_KEY and AI_PROVIDER == "gemini":
-            try:
-                response = await call_gemini_chat(system_prompt, user_prompt)
-                return response
-            except Exception as e:
-                logger.warning(f"Gemini chat failed: {e}")
-        
-        # Try OpenAI as fallback
-        if OPENAI_API_KEY:
-            try:
-                response = openai_client.chat.completions.create(
-                    model="gpt-3.5-turbo",  # Use cheaper model for chat
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.7,  # Slightly more creative for chat
-                    max_tokens=500
-                )
-                return response.choices[0].message.content
-            except Exception as e:
-                logger.warning(f"OpenAI chat failed: {e}")
-        
-        # Fallback response
-        return "I'm here to help with your health questions. While I can provide general guidance, please consult healthcare professionals for specific medical advice."
-        
-    except Exception as e:
-        logger.error(f"Chat error: {e}")
-        return "I'm having trouble responding right now. Please consult healthcare professionals for medical advice."
-
-async def call_gemini_chat(system_prompt: str, user_prompt: str) -> str:
-    """Call Gemini API for chat responses"""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
-    
-    combined_prompt = f"{system_prompt}\n\n{user_prompt}"
-    
-    payload = {
-        "contents": [{
-            "parts": [{
-                "text": combined_prompt
-            }]
-        }],
-        "generationConfig": {
-            "temperature": 0.7,
-            "maxOutputTokens": 500,
-        }
-    }
-    
     async with httpx.AsyncClient(timeout=30.0) as client:
-        await asyncio.sleep(1)  # Rate limiting
+        await asyncio.sleep(1)  # Rate limiting for Gemini
         response = await client.post(url, json=payload)
         
         if response.status_code == 429:
@@ -521,11 +363,143 @@ async def call_gemini_chat(system_prompt: str, user_prompt: str) -> str:
             response = await client.post(url, json=payload)
         
         if response.status_code != 200:
-            raise Exception(f"Gemini chat error: {response.status_code}")
+            error_text = response.text
+            logger.error(f"Gemini chat API error {response.status_code}: {error_text}")
+            raise Exception(f"Gemini chat API error: {response.status_code}")
         
         result = response.json()
+        
+        if "candidates" not in result or not result["candidates"]:
+            raise Exception("No candidates in Gemini chat response")
+            
         return result["candidates"][0]["content"]["parts"][0]["text"]
 
+async def get_chat_response(system_prompt: str, user_prompt: str) -> str:
+    """Get AI response for chat messages using Gemini"""
+    try:
+        response = await call_gemini_chat(system_prompt, user_prompt)
+        return response
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        return "I'm having trouble responding right now. Please consult healthcare professionals for medical advice."
+
+async def analyze_facial_photo_with_gemini(image_base64: str) -> FacialAnalysisResponse:
+    """Analyze facial photo for fatigue and fever indicators using Gemini Vision"""
+    if not GEMINI_API_KEY:
+        raise Exception("Gemini API key not configured")
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    
+    prompt = """You are a medical AI assistant analyzing a facial photograph for signs of fatigue and fever. 
+
+Please examine this photo and provide analysis in JSON format for:
+
+FATIGUE INDICATORS:
+- Dark circles under eyes
+- Droopy or heavy eyelids
+- Pale or ashen skin tone
+- Lack of facial color/vitality
+- Tired facial expression
+- Sunken appearance around eyes
+
+FEVER INDICATORS:
+- Flushed or red face/cheeks
+- Sweaty or clammy appearance
+- Glossy or watery eyes
+- Red or irritated eyes
+- Overall unwell appearance
+
+ASSESSMENT CRITERIA:
+- Rate confidence from 0.0 to 1.0
+- Be objective and medical in assessment
+- Note if photo quality affects analysis
+- Suggest follow-up if appearance is concerning
+
+Respond with this exact JSON structure:
+{
+    "fatigue_indicators": ["observed indicator 1", "observed indicator 2"],
+    "fever_indicators": ["observed indicator 1", "observed indicator 2"],
+    "overall_health_appearance": "Description of general appearance and health impression",
+    "confidence_score": 0.85,
+    "recommendations": ["recommendation 1", "recommendation 2"]
+}"""
+
+    payload = {
+        "contents": [{
+            "parts": [
+                {"text": prompt},
+                {
+                    "inline_data": {
+                        "mime_type": "image/jpeg",
+                        "data": image_base64
+                    }
+                }
+            ]
+        }],
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 1000,
+        }
+    }
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(url, json=payload)
+        
+        if response.status_code != 200:
+            logger.error(f"Gemini Vision API error {response.status_code}: {response.text}")
+            raise Exception(f"Gemini Vision API error: {response.status_code}")
+        
+        result = response.json()
+        if "candidates" not in result or not result["candidates"]:
+            raise Exception("No candidates in Gemini Vision response")
+            
+        response_text = result["candidates"][0]["content"]["parts"][0]["text"]
+        
+        # Clean and parse JSON response
+        try:
+            response_clean = response_text.strip()
+            if "```json" in response_clean:
+                response_clean = response_clean.split("```json")[1].split("```")[0]
+            elif "```" in response_clean:
+                response_clean = response_clean.split("```")[1].split("```")[0]
+            
+            analysis_data = json.loads(response_clean)
+            return FacialAnalysisResponse(**analysis_data)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse Gemini Vision response: {e}")
+            # Return fallback response
+            return FacialAnalysisResponse(
+                fatigue_indicators=["Unable to analyze - image processing error"],
+                fever_indicators=["Unable to analyze - image processing error"],
+                overall_health_appearance="Analysis could not be completed due to processing error",
+                confidence_score=0.1,
+                recommendations=["Please retake photo with better lighting", "Consult healthcare provider"]
+            )
+
+async def get_facial_analysis_fallback() -> FacialAnalysisResponse:
+    """Fallback response when facial analysis isn't available"""
+    return FacialAnalysisResponse(
+        fatigue_indicators=["Facial analysis not available"],
+        fever_indicators=["Facial analysis not available"],
+        overall_health_appearance="Unable to analyze appearance - please rely on reported symptoms",
+        confidence_score=0.0,
+        recommendations=["Focus on reported symptoms", "Monitor temperature regularly", "Consult healthcare provider if symptoms worsen"]
+    )
+
+async def analyze_facial_photo(image_data: bytes) -> FacialAnalysisResponse:
+    """Main function to analyze facial photo using Gemini Vision"""
+    try:
+        # Convert image to base64
+        image_base64 = base64.b64encode(image_data).decode('utf-8')
+        
+        logger.info("Analyzing facial photo with Gemini Vision")
+        return await analyze_facial_photo_with_gemini(image_base64)
+        
+    except Exception as e:
+        logger.error(f"Facial analysis error: {e}")
+        return await get_facial_analysis_fallback()
+
+# API Endpoints
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint"""
@@ -533,61 +507,43 @@ async def health_check():
         "status": "healthy",
         "service": "AI Fever Triage System",
         "version": "2.0.0",
-        "ai_provider": AI_PROVIDER,
-        "providers_configured": {
-            "openai": bool(OPENAI_API_KEY),
-            "gemini": bool(GEMINI_API_KEY),
-            "ollama": True,  # Assume available if URL is set
-            "huggingface": bool(HUGGINGFACE_API_KEY)
-        }
+        "ai_provider": "gemini",
+        "gemini_configured": bool(GEMINI_API_KEY)
     }
 
-@app.get("/api/test-providers")
-async def test_providers():
-    """Test which AI providers are available"""
-    results = {}
-    
-    # Test Gemini
-    if GEMINI_API_KEY:
-        try:
-            test_response = await call_gemini_api("You are a test.", "Say 'Hello from Gemini'")
-            results["gemini"] = {"status": "available", "response": test_response[:50]}
-        except Exception as e:
-            results["gemini"] = {"status": "error", "error": str(e)}
-    else:
-        results["gemini"] = {"status": "not_configured"}
-    
-    # Test Ollama
+@app.post("/api/analyze-photo", response_model=FacialAnalysisResponse)
+async def analyze_photo_endpoint(file: UploadFile = File(...)):
+    """
+    Analyze uploaded facial photo for fatigue and fever indicators
+    """
     try:
-        test_response = await call_ollama_api("You are a test.", "Say 'Hello from Ollama'")
-        results["ollama"] = {"status": "available", "response": test_response[:50]}
+        # Validate file type
+        if not file.content_type or not file.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail="File must be an image")
+        
+        # Read and validate file size (max 10MB)
+        contents = await file.read()
+        if len(contents) > 10 * 1024 * 1024:  # 10MB
+            raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+        
+        # Validate it's a valid image
+        try:
+            image = Image.open(io.BytesIO(contents))
+            image.verify()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid image file")
+        
+        # Analyze the photo
+        logger.info(f"Analyzing uploaded photo: {file.filename}")
+        analysis = await analyze_facial_photo(contents)
+        
+        return analysis
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        results["ollama"] = {"status": "error", "error": str(e)}
-    
-    # Test Hugging Face
-    if HUGGINGFACE_API_KEY:
-        try:
-            test_response = await call_huggingface_api("You are a test.", "Say 'Hello from HF'")
-            results["huggingface"] = {"status": "available", "response": test_response[:50]}
-        except Exception as e:
-            results["huggingface"] = {"status": "error", "error": str(e)}
-    else:
-        results["huggingface"] = {"status": "not_configured"}
-    
-    # Test OpenAI
-    if openai_client:
-        try:
-            test_response = await call_openai_api("You are a test.", "Say 'Hello from OpenAI'")
-            results["openai"] = {"status": "available", "response": test_response[:50]}
-        except Exception as e:
-            results["openai"] = {"status": "error", "error": str(e)}
-    else:
-        results["openai"] = {"status": "not_configured"}
-    
-    return {
-        "current_provider": AI_PROVIDER,
-        "test_results": results
-    }
+        logger.error(f"Photo analysis error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to analyze photo")
 
 @app.post("/api/triage", response_model=TriageResponse)
 async def triage_assessment(patient_data: PatientData):
@@ -598,7 +554,7 @@ async def triage_assessment(patient_data: PatientData):
         # Log incoming request (without sensitive data)
         logger.info(f"Processing triage request for {patient_data.age}y patient with temp {patient_data.temperature}°F")
         
-        # Get AI assessment (with built-in fallback)
+        # Get AI assessment
         assessment = await get_ai_triage_assessment(patient_data)
         
         # Additional safety checks
@@ -623,14 +579,61 @@ async def triage_assessment(patient_data: PatientData):
         # Return fallback response instead of error
         return await get_fallback_response(patient_data)
 
+@app.post("/api/triage-enhanced", response_model=TriageResponse)
+async def enhanced_triage_assessment(patient_data: EnhancedPatientData):
+    """
+    Enhanced triage endpoint that includes facial analysis data
+    """
+    try:
+        # Log incoming request
+        logger.info(f"Processing enhanced triage request for {patient_data.age}y patient with temp {patient_data.temperature}°F")
+        
+        # Get AI assessment with facial analysis
+        assessment = await get_ai_triage_assessment(patient_data, patient_data.facial_analysis)
+        
+        # Additional safety checks including facial indicators
+        if patient_data.temperature >= 104.0 and assessment.severity not in ["HIGH", "CRITICAL"]:
+            assessment.severity = "CRITICAL"
+            assessment.red_flags.append("Dangerously high fever (≥104°F)")
+            logger.warning(f"Upgraded severity to CRITICAL due to high temperature: {patient_data.temperature}°F")
+        
+        # Check for concerning facial indicators
+        if patient_data.facial_analysis and patient_data.facial_analysis.confidence_score > 0.5:
+            concerning_indicators = [
+                "severe fatigue appearance", "extremely pale", "very flushed", 
+                "difficulty keeping eyes open", "signs of dehydration"
+            ]
+            if any(indicator in " ".join(patient_data.facial_analysis.fatigue_indicators + patient_data.facial_analysis.fever_indicators).lower() 
+                   for indicator in concerning_indicators):
+                if assessment.severity == "LOW":
+                    assessment.severity = "MEDIUM"
+                    assessment.red_flags.append("Concerning appearance noted in facial analysis")
+                    logger.info("Upgraded severity due to concerning facial indicators")
+        
+        # Check for critical symptoms
+        critical_symptoms = ["confusion", "stiff neck", "difficulty breathing", "chest pain", "rapid heartbeat"]
+        if any(symptom.lower() in [s.lower() for s in patient_data.symptoms] for symptom in critical_symptoms):
+            if assessment.severity == "LOW":
+                assessment.severity = "MEDIUM"
+                logger.info("Upgraded severity due to concerning symptoms")
+        
+        return assessment
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in enhanced triage assessment: {e}")
+        # Return fallback response instead of error
+        return await get_fallback_response(patient_data)
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat_endpoint(chat_message: ChatMessage):
     """
     Post-assessment chatbot for follow-up questions
     """
     try:
-        if not os.getenv("GEMINI_API_KEY") and not os.getenv("OPENAI_API_KEY"):
-            logger.error("No AI API keys configured for chat")
+        if not GEMINI_API_KEY:
+            logger.error("Gemini API key not configured for chat")
             raise HTTPException(status_code=500, detail="Chat service not configured")
         
         # Create a healthcare-focused chat prompt
@@ -655,7 +658,7 @@ async def chat_endpoint(chat_message: ChatMessage):
         
         user_prompt = f"Context: {chat_message.context or 'General health question'}\n\nUser Question: {chat_message.message}\n\nPlease provide a helpful, reassuring response with practical advice."
         
-        # Try to get AI response
+        # Get AI response
         ai_response = await get_chat_response(system_prompt, user_prompt)
         
         # Generate follow-up suggestions
@@ -689,9 +692,12 @@ async def root():
     return {
         "message": "AI Fever Triage System API",
         "version": "2.0.0",
+        "ai_provider": "Gemini AI",
         "endpoints": {
             "health": "/api/health",
             "triage": "/api/triage (POST)",
+            "enhanced_triage": "/api/triage-enhanced (POST)",
+            "analyze_photo": "/api/analyze-photo (POST)",
             "chat": "/api/chat (POST)"
         },
         "docs": "/docs"

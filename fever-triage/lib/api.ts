@@ -17,6 +17,18 @@ export interface TriageResponse {
   confidence_score: number;
 }
 
+export interface FacialAnalysisResponse {
+  fatigue_indicators: string[];
+  fever_indicators: string[];
+  overall_health_appearance: string;
+  confidence_score: number;
+  recommendations: string[];
+}
+
+export interface EnhancedPatientData extends PatientData {
+  facial_analysis?: FacialAnalysisResponse;
+}
+
 export interface HealthCheckResponse {
   status: string;
   service: string;
@@ -69,6 +81,43 @@ async function apiRequest<T>(
 
 export async function submitTriageAssessment(patientData: PatientData): Promise<TriageResponse> {
   return apiRequest<TriageResponse>('/api/triage', {
+    method: 'POST',
+    body: JSON.stringify(patientData),
+  });
+}
+
+export async function analyzePhoto(file: File): Promise<FacialAnalysisResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  const url = `${API_BASE_URL}/api/analyze-photo`;
+  
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new APIError(
+        response.status,
+        errorData.detail || `HTTP ${response.status}: ${response.statusText}`
+      );
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (error instanceof APIError) {
+      throw error;
+    }
+    
+    throw new APIError(0, `Network error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+export async function submitEnhancedTriageAssessment(patientData: EnhancedPatientData): Promise<TriageResponse> {
+  return apiRequest<TriageResponse>('/api/triage-enhanced', {
     method: 'POST',
     body: JSON.stringify(patientData),
   });

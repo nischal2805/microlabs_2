@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { PatientData, TriageResponse, submitTriageAssessment, APIError } from '@/lib/api';
+import { PatientData, EnhancedPatientData, TriageResponse, submitTriageAssessment, submitEnhancedTriageAssessment, APIError } from '@/lib/api';
 import SymptomForm from '@/components/SymptomForm';
 import ResultsDisplay from '@/components/ResultsDisplay';
 import DemoCases from '@/components/DemoCases';
@@ -32,12 +32,22 @@ export default function Home() {
     }
   }, []);
 
-  const handleFormSubmit = async (patientData: PatientData) => {
+  const handleFormSubmit = async (patientData: PatientData | EnhancedPatientData) => {
     setLoading(true);
     setError(null);
 
     try {
-      const assessment = await submitTriageAssessment(patientData);
+      let assessment: TriageResponse;
+      
+      // Check if this is enhanced data with facial analysis
+      if ('facial_analysis' in patientData && patientData.facial_analysis) {
+        console.log('Submitting enhanced assessment with facial analysis');
+        assessment = await submitEnhancedTriageAssessment(patientData as EnhancedPatientData);
+      } else {
+        console.log('Submitting standard assessment');
+        assessment = await submitTriageAssessment(patientData as PatientData);
+      }
+      
       setResults(assessment);
       setCurrentStep('results');
     } catch (err) {

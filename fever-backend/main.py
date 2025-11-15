@@ -1331,8 +1331,10 @@ async def comprehensive_triage_assessment(
         if photo:
             logger.info("Step 2: Analyzing facial photo...")
             try:
-                # Validate file type
-                if not photo.content_type or not photo.content_type.startswith('image/'):
+                # Check if photo analysis is configured
+                if not GEMINI_API_KEY:
+                    logger.warning("Gemini API key not configured, skipping photo analysis")
+                elif not photo.content_type or not photo.content_type.startswith('image/'):
                     logger.warning("Invalid photo file type, skipping photo analysis")
                 else:
                     # Read and process photo
@@ -1394,7 +1396,7 @@ Respond with JSON:
                         logger.info(f"Photo analysis completed: {len(facial_analysis.fatigue_indicators)} fatigue, {len(facial_analysis.fever_indicators)} fever indicators")
                         
             except Exception as e:
-                logger.warning(f"Photo analysis failed: {e}, continuing with symptom-only assessment")
+                logger.warning(f"Photo analysis failed (non-critical): {e}, continuing with symptom-only assessment")
         
         # Step 3: Process location and time context
         location_insights = {"insights": "No location data available", "likely_fever_types": [], "seasonal_context": ""}

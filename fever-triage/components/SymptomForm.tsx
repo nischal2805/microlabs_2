@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { PatientData } from '@/lib/api';
+import PhotoUpload from './PhotoUpload';
 
 const AVAILABLE_SYMPTOMS = [
   'Headache', 'Cough', 'Sore Throat', 'Body Aches',
@@ -18,6 +19,12 @@ const FOOD_OPTIONS = [
   'Skipped meals', 'Only liquids', 'Solid foods'
 ];
 
+const INDIAN_CITIES = [
+  'Mumbai', 'Delhi', 'Bangalore', 'Chennai', 'Kolkata',
+  'Hyderabad', 'Pune', 'Ahmedabad', 'Jaipur', 'Lucknow',
+  'Surat', 'Kanpur', 'Nagpur', 'Indore', 'Bhopal'
+];
+
 interface SymptomFormProps {
   onSubmit: (data: PatientData) => void;
   loading?: boolean;
@@ -30,7 +37,10 @@ export default function SymptomForm({ onSubmit, loading = false, initialData }: 
     duration_hours: initialData?.duration_hours || 0,
     age: initialData?.age || 0,
     symptoms: initialData?.symptoms || [],
-    medical_history: initialData?.medical_history || ''
+    medical_history: initialData?.medical_history || '',
+    location: initialData?.location || '',
+    photo_base64: initialData?.photo_base64 || '',
+    photo_url: initialData?.photo_url || ''
   });
 
   const [foodHistory, setFoodHistory] = useState<string[]>([]);
@@ -42,6 +52,14 @@ export default function SymptomForm({ onSubmit, loading = false, initialData }: 
     } else {
       setFoodHistory([...foodHistory, food]);
     }
+  };
+
+  const handlePhotoUploaded = (photoUrl: string, photoData: string) => {
+    setFormData({
+      ...formData,
+      photo_url: photoUrl,
+      photo_base64: photoData
+    });
   };
 
   const validateForm = (): boolean => {
@@ -105,7 +123,10 @@ export default function SymptomForm({ onSubmit, loading = false, initialData }: 
         duration_hours: initialData.duration_hours || 0,
         age: initialData.age || 0,
         symptoms: initialData.symptoms || [],
-        medical_history: initialData.medical_history || ''
+        medical_history: initialData.medical_history || '',
+        location: initialData.location || '',
+        photo_base64: initialData.photo_base64 || '',
+        photo_url: initialData.photo_url || ''
       });
     }
   }, [initialData]);
@@ -174,6 +195,42 @@ export default function SymptomForm({ onSubmit, loading = false, initialData }: 
           disabled={loading}
         />
         {errors.age && <p className="mt-1 text-sm text-red-600">{errors.age}</p>}
+      </div>
+
+      {/* Location Input */}
+      <div>
+        <label htmlFor="location" className="block text-sm font-medium text-gray-700 mb-2">
+          Location (City, State)
+        </label>
+        <input
+          type="text"
+          id="location"
+          list="indian-cities"
+          value={formData.location}
+          onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+          placeholder="e.g., Mumbai, Maharashtra"
+          className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          disabled={loading}
+        />
+        <datalist id="indian-cities">
+          {INDIAN_CITIES.map(city => (
+            <option key={city} value={city} />
+          ))}
+        </datalist>
+        <p className="mt-1 text-xs text-gray-500">
+          For nearby doctor recommendations and emergency contacts
+        </p>
+      </div>
+
+      {/* Photo Upload */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Patient Photo (Optional)
+        </label>
+        <PhotoUpload 
+          onPhotoUploaded={handlePhotoUploaded}
+          currentPhoto={formData.photo_url}
+        />
       </div>
 
       {/* Symptoms Selection */}
@@ -274,7 +331,7 @@ export default function SymptomForm({ onSubmit, loading = false, initialData }: 
             Analyzing...
           </div>
         ) : (
-          'Get AI Triage Assessment'
+          'Get AI Diagnosis Assessment'
         )}
       </button>
     </form>

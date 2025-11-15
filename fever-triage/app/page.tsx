@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { PatientData, TriageResponse, submitTriageAssessment, APIError } from '@/lib/api';
+import { useAuth } from '@/lib/AuthContext';
 import SymptomForm from '@/components/SymptomForm';
 import ResultsDisplay from '@/components/ResultsDisplay';
 import DemoCases from '@/components/DemoCases';
@@ -9,8 +10,11 @@ import TemperatureTracker from '@/components/TemperatureTracker';
 import MedicineReminder from '@/components/MedicineReminder';
 import Chatbot from '@/components/Chatbot';
 import UserProfile from '@/components/UserProfile';
+import AuthModal from '@/components/AuthModal';
+import { LogOut, User } from 'lucide-react';
 
 export default function Home() {
+  const { user, logout } = useAuth();
   const [currentStep, setCurrentStep] = useState<'form' | 'results' | 'dashboard'>('form');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<TriageResponse | null>(null);
@@ -19,6 +23,7 @@ export default function Home() {
   const [showChatbot, setShowChatbot] = useState(false);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [showProfileSetup, setShowProfileSetup] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
   useEffect(() => {
     // Check if user profile exists
@@ -27,10 +32,10 @@ export default function Home() {
     
     if (savedProfile) {
       setUserProfile(JSON.parse(savedProfile));
-    } else if (!profileSkipped) {
+    } else if (!profileSkipped && user) {
       setShowProfileSetup(true);
     }
-  }, []);
+  }, [user]);
 
   const handleFormSubmit = async (patientData: PatientData) => {
     setLoading(true);
@@ -87,12 +92,38 @@ export default function Home() {
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <header className="text-center mb-8">
+          {/* Authentication Status */}
+          <div className="flex justify-end mb-4">
+            {user ? (
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center bg-white px-4 py-2 rounded-lg shadow">
+                  <User className="w-4 h-4 text-blue-600 mr-2" />
+                  <span className="text-sm text-gray-700">{user.displayName || user.email}</span>
+                </div>
+                <button
+                  onClick={() => logout()}
+                  className="flex items-center bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+                >
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Logout
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowAuthModal(true)}
+                className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Sign In / Sign Up
+              </button>
+            )}
+          </div>
+
           <h1 className="text-4xl md:text-5xl font-bold text-blue-900 mb-4">
-            AI Fever Triage System
+            AI Fever Diagnosis System
           </h1>
           <p className="text-lg text-blue-700 max-w-2xl mx-auto leading-relaxed">
-            Intelligent clinical decision support powered by AI. Get instant fever triage assessments 
-            based on clinical protocols and evidence-based medicine.
+            Comprehensive fever diagnosis powered by AI with doctor recommendations and medication guidance. 
+            Get instant triage assessments based on clinical protocols for patients in India.
           </p>
           
           {/* Navigation */}
@@ -131,6 +162,14 @@ export default function Home() {
             )}
           </div>
         </header>
+
+        {/* Auth Modal */}
+        {showAuthModal && (
+          <AuthModal
+            onClose={() => setShowAuthModal(false)}
+            onSuccess={() => setShowAuthModal(false)}
+          />
+        )}
 
         {/* Medical Disclaimer */}
         <div className="bg-gray-50 border-l-4 border-gray-400 p-6 rounded-lg shadow-md mb-8 max-w-4xl mx-auto">

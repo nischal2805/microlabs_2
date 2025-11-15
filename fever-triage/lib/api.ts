@@ -6,6 +6,25 @@ export interface PatientData {
   symptoms: string[];
   age: number;
   medical_history?: string;
+  photo_base64?: string;
+  photo_url?: string;
+  location?: string;
+}
+
+export interface MedicationRecommendation {
+  name: string;
+  manufacturer: string;
+  dosage: string;
+  frequency: string;
+  purpose: string;
+}
+
+export interface DoctorRecommendation {
+  name: string;
+  specialty: string;
+  phone: string;
+  address: string;
+  distance?: string;
 }
 
 export interface TriageResponse {
@@ -15,13 +34,23 @@ export interface TriageResponse {
   clinical_explanation: string;
   red_flags: string[];
   confidence_score: number;
+  medications: MedicationRecommendation[];
+  doctors: DoctorRecommendation[];
+  emergency_contacts: string[];
+  photo_analysis?: string | null;
 }
 
 export interface HealthCheckResponse {
   status: string;
   service: string;
   version: string;
-  openai_configured: boolean;
+  ai_provider: string;
+  providers_configured: {
+    openai: boolean;
+    gemini: boolean;
+    ollama: boolean;
+    huggingface: boolean;
+  };
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';

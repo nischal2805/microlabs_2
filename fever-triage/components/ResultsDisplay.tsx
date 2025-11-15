@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { TriageResponse } from '@/lib/api';
+import { DoctorSpecialtyService } from '@/lib/doctorSpecialtyService';
+import { MapPin, Search } from 'lucide-react';
 
 interface ResultsDisplayProps {
   results: TriageResponse;
@@ -36,6 +38,24 @@ export default function ResultsDisplay({ results, onStartNewAssessment }: Result
   
   const config = severityConfig[results.severity];
   const confidencePercentage = Math.round(results.confidence_score * 100);
+
+  // Analyze fever type and get doctor recommendations
+  const feverAnalysis = DoctorSpecialtyService.analyzeFeverType(results);
+  const searchKeywords = DoctorSpecialtyService.getSearchKeywords(feverAnalysis.feverType, feverAnalysis.isEmergency);
+
+  const handleFindSpecializedDoctors = () => {
+    // Store the fever analysis in localStorage for the FindDoctors component
+    localStorage.setItem('feverAnalysis', JSON.stringify({
+      feverType: feverAnalysis.feverType,
+      recommendedSpecialties: feverAnalysis.recommendedSpecialties,
+      searchKeywords,
+      isEmergency: feverAnalysis.isEmergency,
+      confidence: feverAnalysis.confidence
+    }));
+    
+    // Redirect to find doctors page
+    window.location.href = '/?findDoctors=true';
+  };
 
   return (
     <div className="space-y-6">
@@ -137,8 +157,29 @@ export default function ResultsDisplay({ results, onStartNewAssessment }: Result
         </p>
       </div>
 
+      {/* Smart Doctor Recommendation */}
+      <div className="bg-green-50 border-l-4 border-green-500 p-6 rounded-md">
+        <h3 className="text-lg font-semibold text-green-800 mb-3">
+          🏥 Smart Doctor Recommendation
+        </h3>
+        <p className="text-green-700 mb-4">
+          Based on your symptoms, we recommend finding a {feverAnalysis.recommendedSpecialties[0]?.specialty?.replace('_', ' ') || 'general practitioner'}.
+          <span className="block text-sm mt-1">
+            Detected fever type: <strong>{feverAnalysis.feverType.replace('_', ' ')}</strong> (Confidence: {Math.round(feverAnalysis.confidence * 100)}%)
+          </span>
+        </p>
+        <button
+          onClick={handleFindSpecializedDoctors}
+          className="w-full flex items-center justify-center gap-2 bg-green-600 text-white py-3 px-6 rounded-md font-medium hover:bg-green-700 transition-colors"
+        >
+          <Search className="w-5 h-5" />
+          <MapPin className="w-5 h-5" />
+          Find Specialized Doctors Near Me
+        </button>
+      </div>
+
       {/* Action Buttons */}
-      <div className="flex justify-center pt-4">
+      <div className="flex justify-center gap-4 pt-4">
         <button
           onClick={onStartNewAssessment}
           className="bg-blue-600 text-white py-3 px-8 rounded-md font-medium hover:bg-blue-700 transition-colors"

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { PatientData, TriageResponse, submitTriageAssessment, APIError } from '@/lib/api';
+import { useSearchParams } from 'next/navigation';
 import SymptomForm from '@/components/SymptomForm';
 import ResultsDisplay from '@/components/ResultsDisplay';
 import DemoCases from '@/components/DemoCases';
@@ -9,9 +9,13 @@ import TemperatureTracker from '@/components/TemperatureTracker';
 import MedicineReminder from '@/components/MedicineReminder';
 import Chatbot from '@/components/Chatbot';
 import UserProfile from '@/components/UserProfile';
+import GoogleMapsLoader from '@/components/GoogleMapsLoader';
+import FindDoctors from '@/components/FindDoctors';
+import { PatientData, TriageResponse, submitTriageAssessment, APIError } from '@/lib/api';
 
 export default function Home() {
-  const [currentStep, setCurrentStep] = useState<'form' | 'results' | 'dashboard'>('form');
+  const searchParams = useSearchParams();
+  const [currentStep, setCurrentStep] = useState<'form' | 'results' | 'dashboard' | 'findDoctors'>('form');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<TriageResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -21,6 +25,12 @@ export default function Home() {
   const [showProfileSetup, setShowProfileSetup] = useState(false);
 
   useEffect(() => {
+    // Check for URL parameter to show find doctors
+    const findDoctorsParam = searchParams?.get('findDoctors');
+    if (findDoctorsParam === 'true') {
+      setCurrentStep('findDoctors');
+    }
+
     // Check if user profile exists
     const savedProfile = localStorage.getItem('userProfile');
     const profileSkipped = localStorage.getItem('profileSkipped');
@@ -30,7 +40,7 @@ export default function Home() {
     } else if (!profileSkipped) {
       setShowProfileSetup(true);
     }
-  }, []);
+  }, [searchParams]);
 
   const handleFormSubmit = async (patientData: PatientData) => {
     setLoading(true);
@@ -42,6 +52,8 @@ export default function Home() {
       setCurrentStep('results');
     } catch (err) {
       if (err instanceof APIError) {
+        setError(`Assessment failed: ${err.message}`);
+      } else if (err instanceof Error) {
         setError(`Assessment failed: ${err.message}`);
       } else {
         setError('An unexpected error occurred. Please try again.');
@@ -116,6 +128,16 @@ export default function Home() {
               }`}
             >
               Dashboard
+            </button>
+            <button
+              onClick={() => setCurrentStep('findDoctors')}
+              className={`px-4 py-2 rounded-md font-medium transition-colors ${
+                currentStep === 'findDoctors'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-blue-600 border border-blue-600 hover:bg-blue-50'
+              }`}
+            >
+              Find Doctors
             </button>
             {results && (
               <button
@@ -219,6 +241,10 @@ export default function Home() {
                 </div>
               </div>
             </div>
+          ) : currentStep === 'findDoctors' ? (
+            <GoogleMapsLoader>
+              {(loaded) => <FindDoctors googleMapsLoaded={loaded} />}
+            </GoogleMapsLoader>
           ) : (
             <div className="bg-white rounded-lg shadow-lg p-8">
               <h2 className="text-2xl font-bold text-gray-900 mb-6 text-center">

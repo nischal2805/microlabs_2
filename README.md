@@ -57,7 +57,7 @@ An AI-powered triage system that provides **instant, evidence-based fever assess
 graph TB
     A[Patient Input] --> B[Next.js Frontend]
     B --> C[FastAPI Backend]
-    C --> D[OpenAI GPT-4]
+    C --> D[Gemini]
     D --> E[Clinical Assessment]
     E --> F[Triage Response]
     F --> B

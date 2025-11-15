@@ -11,11 +11,12 @@ import Chatbot from '@/components/Chatbot';
 import UserProfile from '@/components/UserProfile';
 import GoogleMapsLoader from '@/components/GoogleMapsLoader';
 import FindDoctors from '@/components/FindDoctors';
+import DailyAnalytics from '@/components/DailyAnalytics';
 import { PatientData, TriageResponse, submitTriageAssessment, APIError } from '@/lib/api';
 
 export default function Home() {
   const searchParams = useSearchParams();
-  const [currentStep, setCurrentStep] = useState<'form' | 'results' | 'dashboard' | 'findDoctors'>('form');
+  const [currentStep, setCurrentStep] = useState<'form' | 'results' | 'dashboard' | 'findDoctors' | 'analytics'>('form');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<TriageResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +24,7 @@ export default function Home() {
   const [showChatbot, setShowChatbot] = useState(false);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [showProfileSetup, setShowProfileSetup] = useState(false);
+  const [googleMapsLoaded, setGoogleMapsLoaded] = useState(false);
 
   useEffect(() => {
     // Check for URL parameter to show find doctors
@@ -95,8 +97,12 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      <div className="container mx-auto px-4 py-8">
+    <GoogleMapsLoader>
+      {(loaded) => {
+        setGoogleMapsLoaded(loaded);
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+            <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <header className="text-center mb-8">
           <h1 className="text-4xl md:text-5xl font-bold text-blue-900 mb-4">
@@ -138,6 +144,16 @@ export default function Home() {
               }`}
             >
               Find Doctors
+            </button>
+            <button
+              onClick={() => setCurrentStep('analytics')}
+              className={`px-4 py-2 rounded-md font-medium transition-colors ${
+                currentStep === 'analytics'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-blue-600 border border-blue-600 hover:bg-blue-50'
+              }`}
+            >
+              Daily Analytics
             </button>
             {results && (
               <button
@@ -242,9 +258,9 @@ export default function Home() {
               </div>
             </div>
           ) : currentStep === 'findDoctors' ? (
-            <GoogleMapsLoader>
-              {(loaded) => <FindDoctors googleMapsLoaded={loaded} />}
-            </GoogleMapsLoader>
+            <FindDoctors googleMapsLoaded={googleMapsLoaded} />
+          ) : currentStep === 'analytics' ? (
+            <DailyAnalytics googleMapsLoaded={googleMapsLoaded} />
           ) : (
             <div className="bg-white rounded-lg shadow-lg p-8">
               <h2 className="text-2xl font-bold text-gray-900 mb-6 text-center">
@@ -310,7 +326,10 @@ export default function Home() {
             </div>
           </div>
         </footer>
-      </div>
-    </div>
+            </div>
+          </div>
+        );
+      }}
+    </GoogleMapsLoader>
   );
 }

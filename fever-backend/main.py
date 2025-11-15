@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, validator
 from typing import List, Optional
 import os
@@ -9,12 +10,56 @@ import asyncio
 import httpx
 from dotenv import load_dotenv
 
+# Import Firebase Admin (will initialize if configured)
+FIREBASE_AVAILABLE = False
+try:
+    import firebase_admin
+    from firebase_admin import auth, credentials
+    FIREBASE_AVAILABLE = True
+except ImportError:
+    pass  # Will be handled after logger is initialized
+
 # Load environment variables from .env file
 load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Initialize Firebase Admin
+if FIREBASE_AVAILABLE:
+    try:
+        # Try to initialize Firebase Admin
+        if not firebase_admin._apps:
+            cred_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH")
+            if cred_path and os.path.exists(cred_path):
+                cred = credentials.Certificate(cred_path)
+                firebase_admin.initialize_app(cred)
+                logger.info("Firebase Admin initialized with service account file")
+            else:
+                # Try environment variables
+                service_account_info = {
+                    "type": "service_account",
+                    "project_id": os.getenv("FIREBASE_PROJECT_ID"),
+                    "private_key_id": os.getenv("FIREBASE_PRIVATE_KEY_ID"),
+                    "private_key": os.getenv("FIREBASE_PRIVATE_KEY", "").replace("\\n", "\n"),
+                    "client_email": os.getenv("FIREBASE_CLIENT_EMAIL"),
+                    "client_id": os.getenv("FIREBASE_CLIENT_ID"),
+                }
+                if service_account_info.get("project_id") and service_account_info.get("private_key"):
+                    cred = credentials.Certificate(service_account_info)
+                    firebase_admin.initialize_app(cred)
+                    logger.info("Firebase Admin initialized with environment variables")
+                else:
+                    logger.warning("Firebase Admin not configured - authentication will be optional")
+                    FIREBASE_AVAILABLE = False
+        else:
+            logger.info("Firebase Admin already initialized")
+    except Exception as e:
+        logger.warning(f"Firebase Admin initialization failed: {e}. Authentication will be optional.")
+        FIREBASE_AVAILABLE = False
+else:
+    logger.warning("Firebase Admin package not installed - authentication will be optional")
 
 app = FastAPI(
     title="AI Fever Triage System",
@@ -76,6 +121,26 @@ class ChatMessage(BaseModel):
 class ChatResponse(BaseModel):
     response: str = Field(..., description="AI response to user question")
     suggestions: List[str] = Field(default=[], description="Suggested follow-up questions")
+
+# Firebase Authentication Dependencies
+security = HTTPBearer(auto_error=False)
+
+async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    """Optional auth - returns user info if token provided and valid, None otherwise"""
+    if not credentials:
+        return None
+    
+    if not FIREBASE_AVAILABLE:
+        logger.warning("Firebase Admin not available - skipping token verification")
+        return None
+    
+    try:
+        token = credentials.credentials
+        decoded_token = auth.verify_id_token(token)
+        return decoded_token
+    except Exception as e:
+        logger.warning(f"Token verification failed: {e}")
+        return None
 
 def create_system_prompt() -> str:
     return """You are a clinical decision support AI specializing in emergency medicine, infectious diseases, and fever triage. 
@@ -534,6 +599,7 @@ async def health_check():
         "service": "AI Fever Triage System",
         "version": "2.0.0",
         "ai_provider": AI_PROVIDER,
+        "firebase_configured": FIREBASE_AVAILABLE,
         "providers_configured": {
             "openai": bool(OPENAI_API_KEY),
             "gemini": bool(GEMINI_API_KEY),
@@ -590,13 +656,18 @@ async def test_providers():
     }
 
 @app.post("/api/triage", response_model=TriageResponse)
-async def triage_assessment(patient_data: PatientData):
+async def triage_assessment(
+    patient_data: PatientData,
+    user: Optional[dict] = Depends(get_current_user)
+):
     """
     Main triage endpoint that processes patient data and returns AI-powered assessment
+    Optional authentication - works with or without auth token
     """
     try:
         # Log incoming request (without sensitive data)
-        logger.info(f"Processing triage request for {patient_data.age}y patient with temp {patient_data.temperature}°F")
+        user_info = f"user: {user.get('email')}" if user else "anonymous user"
+        logger.info(f"Processing triage request for {user_info}, {patient_data.age}y patient with temp {patient_data.temperature}°F")
         
         # Get AI assessment (with built-in fallback)
         assessment = await get_ai_triage_assessment(patient_data)
@@ -624,14 +695,21 @@ async def triage_assessment(patient_data: PatientData):
         return await get_fallback_response(patient_data)
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat_endpoint(chat_message: ChatMessage):
+async def chat_endpoint(
+    chat_message: ChatMessage,
+    user: Optional[dict] = Depends(get_current_user)
+):
     """
     Post-assessment chatbot for follow-up questions
+    Optional authentication - works with or without auth token
     """
     try:
         if not os.getenv("GEMINI_API_KEY") and not os.getenv("OPENAI_API_KEY"):
             logger.error("No AI API keys configured for chat")
             raise HTTPException(status_code=500, detail="Chat service not configured")
+        
+        user_info = f"user: {user.get('email')}" if user else "anonymous user"
+        logger.info(f"Chat request from {user_info}")
         
         # Create a healthcare-focused chat prompt
         system_prompt = """You are a helpful healthcare assistant providing follow-up support after a fever triage assessment. 

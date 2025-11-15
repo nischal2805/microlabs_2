@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { PatientData } from '@/lib/api';
+import { PatientData, EnhancedPatientData, FacialAnalysisResponse, submitEnhancedTriageAssessment } from '@/lib/api';
+import PhotoUpload from './PhotoUpload';
 
 const AVAILABLE_SYMPTOMS = [
   'Headache', 'Cough', 'Sore Throat', 'Body Aches',
@@ -19,7 +20,7 @@ const FOOD_OPTIONS = [
 ];
 
 interface SymptomFormProps {
-  onSubmit: (data: PatientData) => void;
+  onSubmit: (data: PatientData | EnhancedPatientData) => void;
   loading?: boolean;
   initialData?: Partial<PatientData>;
 }
@@ -35,6 +36,7 @@ export default function SymptomForm({ onSubmit, loading = false, initialData }: 
 
   const [foodHistory, setFoodHistory] = useState<string[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [facialAnalysis, setFacialAnalysis] = useState<FacialAnalysisResponse | null>(null);
 
   const toggleFoodHistory = (food: string) => {
     if (foodHistory.includes(food)) {
@@ -67,17 +69,22 @@ export default function SymptomForm({ onSubmit, loading = false, initialData }: 
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: any) => {
     e.preventDefault();
     if (validateForm()) {
       // Include food history in medical history if any selected
-      const enhancedData = {
+      const enhancedData: EnhancedPatientData = {
         ...formData,
         medical_history: formData.medical_history + 
-          (foodHistory.length > 0 ? `\n\nFood/Diet History: ${foodHistory.join(', ')}` : '')
+          (foodHistory.length > 0 ? `\n\nFood/Diet History: ${foodHistory.join(', ')}` : ''),
+        facial_analysis: facialAnalysis || undefined
       };
       onSubmit(enhancedData);
     }
+  };
+
+  const handleFacialAnalysis = (analysis: FacialAnalysisResponse) => {
+    setFacialAnalysis(analysis);
   };
 
   const toggleSymptom = (symptom: string) => {
@@ -252,6 +259,14 @@ export default function SymptomForm({ onSubmit, loading = false, initialData }: 
           onChange={(e) => setFormData({ ...formData, medical_history: e.target.value })}
           placeholder="Any relevant medical conditions, medications, or recent illnesses..."
           className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          disabled={loading}
+        />
+      </div>
+
+      {/* Photo Upload for Facial Analysis */}
+      <div className="border-t pt-6">
+        <PhotoUpload 
+          onAnalysisComplete={handleFacialAnalysis}
           disabled={loading}
         />
       </div>

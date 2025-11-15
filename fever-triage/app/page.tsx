@@ -1,5 +1,14 @@
 "use client";
 
+import { useState, useEffect } from 'react';
+import { PatientData, EnhancedPatientData, TriageResponse, submitTriageAssessment, submitEnhancedTriageAssessment, APIError } from '@/lib/api';
+import SymptomForm from '@/components/SymptomForm';
+import ResultsDisplay from '@/components/ResultsDisplay';
+import DemoCases from '@/components/DemoCases';
+import TemperatureTracker from '@/components/TemperatureTracker';
+import MedicineReminder from '@/components/MedicineReminder';
+import Chatbot from '@/components/Chatbot';
+import UserProfile from '@/components/UserProfile';
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -33,6 +42,35 @@ export default function Home() {
 		setLoading(true);
 		setError(null);
 
+  const handleFormSubmit = async (patientData: PatientData | EnhancedPatientData) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      let assessment: TriageResponse;
+      
+      // Check if this is enhanced data with facial analysis
+      if ('facial_analysis' in patientData && patientData.facial_analysis) {
+        console.log('Submitting enhanced assessment with facial analysis');
+        assessment = await submitEnhancedTriageAssessment(patientData as EnhancedPatientData);
+      } else {
+        console.log('Submitting standard assessment');
+        assessment = await submitTriageAssessment(patientData as PatientData);
+      }
+      
+      setResults(assessment);
+      setCurrentStep('results');
+    } catch (err) {
+      if (err instanceof APIError) {
+        setError(`Assessment failed: ${err.message}`);
+      } else {
+        setError('An unexpected error occurred. Please try again.');
+      }
+      console.error('Triage assessment error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 		try {
 			const assessment = await submitTriageAssessment(patientData);
 			setResults(assessment);

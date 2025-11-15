@@ -1,10 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { TriageResponse } from '@/lib/api';
+import { ComprehensiveTriageResponse } from '@/lib/api';
 
 interface ResultsDisplayProps {
-  results: TriageResponse;
+  results: ComprehensiveTriageResponse;
   onStartNewAssessment: () => void;
 }
 
@@ -136,6 +136,125 @@ export default function ResultsDisplay({ results, onStartNewAssessment }: Result
           Always consult with qualified healthcare providers for proper diagnosis and treatment.
         </p>
       </div>
+
+      {/* Facial Analysis Results */}
+      {results.facial_analysis && (
+        <div className="bg-gradient-to-br from-purple-50 to-indigo-100 rounded-xl p-6 border border-purple-200">
+          <div className="flex items-center space-x-2 mb-4">
+            <span className="text-2xl">📸</span>
+            <h3 className="text-xl font-bold text-purple-900">AI Facial Analysis Results</h3>
+          </div>
+
+          <div className="space-y-4">
+            {/* Confidence Score */}
+            <div className="bg-white rounded-lg p-4 shadow-sm">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-bold text-gray-700 flex items-center space-x-1">
+                  <span>🎯</span>
+                  <span>Analysis Confidence:</span>
+                </span>
+                <span className="text-lg font-bold text-purple-600">
+                  {Math.round(results.facial_analysis.confidence_score * 100)}%
+                </span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div 
+                  className="bg-gradient-to-r from-purple-500 to-blue-500 h-2 rounded-full transition-all duration-500"
+                  style={{ width: `${Math.round(results.facial_analysis.confidence_score * 100)}%` }}
+                ></div>
+              </div>
+            </div>
+
+            {/* Overall Appearance */}
+            <div className="bg-white rounded-lg p-4 shadow-sm">
+              <div className="flex items-center space-x-2 mb-3">
+                <span className="text-lg">👁️</span>
+                <span className="text-sm font-bold text-gray-700">Overall Health Appearance:</span>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3 border-l-4 border-purple-500">
+                <p className="text-sm text-gray-700 leading-relaxed">
+                  {results.facial_analysis.overall_health_appearance}
+                </p>
+              </div>
+            </div>
+
+            {/* Fatigue Indicators */}
+            {results.facial_analysis.fatigue_indicators.length > 0 && (
+              <div className="bg-white rounded-lg p-4 shadow-sm">
+                <div className="flex items-center space-x-2 mb-3">
+                  <span className="text-lg">😴</span>
+                  <span className="text-sm font-bold text-gray-700">Detected Fatigue Signs:</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {results.facial_analysis.fatigue_indicators.map((indicator: string, index: number) => (
+                    <div
+                      key={index}
+                      className="flex items-center space-x-2 bg-yellow-50 border border-yellow-200 rounded-lg p-2"
+                    >
+                      <span className="w-2 h-2 bg-yellow-500 rounded-full"></span>
+                      <span className="text-sm text-yellow-800 font-medium">{indicator}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Fever Indicators */}
+            {results.facial_analysis.fever_indicators.length > 0 && (
+              <div className="bg-white rounded-lg p-4 shadow-sm">
+                <div className="flex items-center space-x-2 mb-3">
+                  <span className="text-lg">🌡️</span>
+                  <span className="text-sm font-bold text-gray-700">Detected Fever Signs:</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {results.facial_analysis.fever_indicators.map((indicator: string, index: number) => (
+                    <div
+                      key={index}
+                      className="flex items-center space-x-2 bg-red-50 border border-red-200 rounded-lg p-2"
+                    >
+                      <span className="w-2 h-2 bg-red-500 rounded-full"></span>
+                      <span className="text-sm text-red-800 font-medium">{indicator}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* AI Recommendations */}
+            {results.facial_analysis.recommendations.length > 0 && (
+              <div className="bg-white rounded-lg p-4 shadow-sm">
+                <div className="flex items-center space-x-2 mb-3">
+                  <span className="text-lg">💡</span>
+                  <span className="text-sm font-bold text-gray-700">Photo-Based Recommendations:</span>
+                </div>
+                <div className="space-y-2">
+                  {results.facial_analysis.recommendations.map((rec: string, index: number) => (
+                    <div key={index} className="flex items-start space-x-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                      <div className="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold mt-0.5">
+                        {index + 1}
+                      </div>
+                      <p className="text-sm text-blue-800 leading-relaxed flex-1">{rec}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Combined Reasoning */}
+            <div className="bg-white rounded-lg p-4 shadow-sm">
+              <div className="flex items-center space-x-2 mb-3">
+                <span className="text-lg">🤖</span>
+                <span className="text-sm font-bold text-gray-700">AI Combined Assessment:</span>
+              </div>
+              <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-3 border-l-4 border-purple-500">
+                <p className="text-sm text-gray-700 leading-relaxed">
+                  {results.combined_reasoning}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Action Buttons */}
       <div className="flex justify-center pt-4">

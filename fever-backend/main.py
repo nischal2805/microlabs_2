@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, validator
@@ -8,6 +8,9 @@ import json
 import logging
 import asyncio
 import httpx
+import base64
+from PIL import Image
+import io
 from dotenv import load_dotenv
 
 # Import Firebase Admin (will initialize if configured)
@@ -122,6 +125,28 @@ class ChatResponse(BaseModel):
     response: str = Field(..., description="AI response to user question")
     suggestions: List[str] = Field(default=[], description="Suggested follow-up questions")
 
+class FacialAnalysisResponse(BaseModel):
+    fatigue_indicators: List[str] = Field(..., description="List of detected fatigue indicators")
+    fever_indicators: List[str] = Field(..., description="List of detected fever indicators")
+    overall_health_appearance: str = Field(..., description="Overall health assessment from appearance")
+    confidence_score: float = Field(..., ge=0.0, le=1.0, description="AI confidence in analysis")
+    recommendations: List[str] = Field(..., description="List of health recommendations")
+
+class ComprehensiveTriageResponse(BaseModel):
+    # Basic triage response
+    severity: str = Field(..., description="Severity level: LOW/MEDIUM/HIGH/CRITICAL")
+    diagnosis_suggestions: List[str] = Field(..., description="List of potential diagnoses")
+    recommended_action: str = Field(..., description="Recommended action for patient")
+    clinical_explanation: str = Field(..., description="Clinical reasoning and explanation")
+    red_flags: List[str] = Field(..., description="List of concerning symptoms/signs")
+    confidence_score: float = Field(..., ge=0.0, le=1.0, description="AI confidence score")
+    
+    # Photo analysis results
+    facial_analysis: Optional[FacialAnalysisResponse] = Field(None, description="Facial analysis results if photo provided")
+    
+    # Combined assessment
+    combined_reasoning: str = Field(..., description="Combined assessment reasoning including visual and symptom analysis")
+
 # Firebase Authentication Dependencies
 security = HTTPBearer(auto_error=False)
 
@@ -143,33 +168,92 @@ async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] =
         return None
 
 def create_system_prompt() -> str:
-    return """You are a clinical decision support AI specializing in emergency medicine, infectious diseases, and fever triage. 
+    return """You are a clinical decision support AI specializing in fever triage and infectious diseases common in India. 
 
 Your role is to:
-- Use evidence-based medicine principles
+- Use evidence-based medicine principles specific to Indian healthcare context
 - Apply SIRS criteria for sepsis assessment
-- Follow standard ER protocols and triage guidelines
+- Follow Indian medical protocols and WHO guidelines
 - Always err on the side of caution for patient safety
 - Identify life-threatening conditions immediately
-- Provide differential diagnoses ranked by probability
-- Consider age-specific considerations
+- Provide differential diagnoses ranked by probability for Indian endemic diseases
+- Consider age-specific considerations and seasonal patterns in India
 
-Clinical Guidelines:
-- LOW severity: Common viral infections, self-care appropriate, typically temp <101°F
-- MEDIUM severity: Flu-like illness, see doctor within 24-48 hours, temp 101-103°F  
-- HIGH severity: Possible bacterial infection, same-day medical attention needed, temp >103°F
-- CRITICAL severity: Signs of sepsis/meningitis/severe pneumonia, immediate ER required
+INDIA-SPECIFIC FEVER CONDITIONS TO CONSIDER:
 
-Red Flag Symptoms (require immediate attention):
-- Altered mental status, confusion, lethargy
-- Stiff neck with fever (meningitis concern)
+1. DENGUE FEVER (Monsoon season prevalent)
+   Symptoms: Sudden high fever, severe body/joint pain, skin rash, bleeding tendency
+   Precautions: Hydration with ORS, avoid aspirin/ibuprofen, monitor platelets
+   Severity: HIGH if platelet drop or bleeding signs
+
+2. MALARIA (All year, peak in monsoon)
+   Symptoms: Fever with chills, sweating episodes, headache
+   Precautions: Mosquito protection, eliminate stagnant water
+   Severity: HIGH for P. falciparum, CRITICAL if cerebral symptoms
+
+3. TYPHOID (Endemic, poor sanitation areas)
+   Symptoms: Gradually rising fever, abdominal pain, rose spots
+   Precautions: Boiled water, food hygiene, avoid street food
+   Severity: MEDIUM to HIGH, CRITICAL if complications
+
+4. CHIKUNGUNYA (Aedes mosquito borne)
+   Symptoms: Sudden high fever, severe joint pain, rash
+   Precautions: Mosquito protection, joint care, hydration
+   Severity: MEDIUM, HIGH in elderly
+
+5. VIRAL FEVER (Common, seasonal)
+   Symptoms: Mild-moderate fever, cold, cough, throat irritation
+   Precautions: Steam inhalation, warm fluids, rest
+   Severity: LOW to MEDIUM
+
+6. HEAT EXHAUSTION (Summer months)
+   Symptoms: High body temperature, dizziness, heavy sweating
+   Precautions: Cool environment, electrolyte solutions, light clothing
+   Severity: MEDIUM, CRITICAL if heat stroke
+
+7. GASTROENTERITIS FEVER (Monsoon/contaminated food)
+   Symptoms: Fever with vomiting, diarrhea, dehydration
+   Precautions: ORS frequently, bland foods (BRAT diet), hand hygiene
+   Severity: MEDIUM, HIGH if severe dehydration
+
+8. PNEUMONIA-RELATED FEVER (Winter/pollution)
+   Symptoms: Fever with productive cough, chest pain, breathing difficulty
+   Precautions: Warm fluids, rest, avoid cold air
+   Severity: HIGH, CRITICAL if respiratory distress
+
+9. SEPSIS-RELATED FEVER (Medical emergency)
+   Symptoms: High persistent fever, confusion, rapid pulse, low BP
+   Precautions: IMMEDIATE emergency care
+   Severity: CRITICAL - require immediate hospitalization
+
+10. CHICKENPOX (More common in children)
+    Symptoms: Fever with itchy fluid-filled blisters
+    Precautions: Isolation, avoid scratching, cool baths
+    Severity: LOW to MEDIUM, HIGH if complications
+
+SEVERITY CLASSIFICATION (India-specific):
+- LOW: Viral fever, mild heat exhaustion, early chickenpox (temp <101°F)
+- MEDIUM: Typhoid, chikungunya, gastroenteritis, moderate pneumonia (temp 101-103°F)
+- HIGH: Dengue, malaria, severe pneumonia, dehydration (temp >103°F)
+- CRITICAL: Severe malaria, sepsis, heat stroke, respiratory distress (temp >104°F or danger signs)
+
+RED FLAG SYMPTOMS (Immediate hospital referral):
+- Altered consciousness, confusion
 - Difficulty breathing, chest pain
-- Rapid heart rate with hypotension signs
-- Petechial rash
-- Severe dehydration
+- Bleeding (dengue concern)
+- Severe dehydration signs
+- Stiff neck (meningitis)
 - Temperature >104°F (40°C)
+- Rapid pulse with low BP
+- Persistent vomiting unable to keep fluids down
 
-Always return a properly formatted JSON response with all required fields. Be thorough but concise in your clinical reasoning."""
+SEASONAL CONSIDERATIONS:
+- Monsoon (June-Sept): Higher risk of dengue, malaria, chikungunya, gastroenteritis
+- Summer (March-May): Heat-related illnesses, dehydration
+- Winter (Dec-Feb): Respiratory infections, pneumonia
+- Post-monsoon (Oct-Nov): Dengue, chikungunya peak
+
+Always return a properly formatted JSON response. Consider seasonal patterns, local disease prevalence, and provide India-appropriate management advice."""
 
 def create_user_prompt(patient_data: PatientData) -> str:
     symptoms_str = ", ".join(patient_data.symptoms) if patient_data.symptoms else "None reported"
@@ -559,6 +643,52 @@ async def get_chat_response(system_prompt: str, user_prompt: str) -> str:
         logger.error(f"Chat error: {e}")
         return "I'm having trouble responding right now. Please consult healthcare professionals for medical advice."
 
+async def call_gemini_vision_api(image_data: str, prompt: str) -> str:
+    """Call Gemini Vision API for photo analysis"""
+    if not GEMINI_API_KEY:
+        raise Exception("Gemini API key not configured")
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    
+    payload = {
+        "contents": [{
+            "parts": [
+                {
+                    "text": prompt
+                },
+                {
+                    "inline_data": {
+                        "mime_type": "image/jpeg",
+                        "data": image_data
+                    }
+                }
+            ]
+        }],
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 1000,
+        }
+    }
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        await asyncio.sleep(1)  # Rate limiting
+        response = await client.post(url, json=payload)
+        
+        if response.status_code == 429:
+            await asyncio.sleep(2)
+            response = await client.post(url, json=payload)
+        
+        if response.status_code != 200:
+            error_text = response.text
+            logger.error(f"Gemini Vision API error {response.status_code}: {error_text}")
+            raise Exception(f"Gemini Vision API error: {response.status_code}")
+        
+        result = response.json()
+        if "candidates" not in result or not result["candidates"]:
+            raise Exception("No candidates in Gemini Vision response")
+            
+        return result["candidates"][0]["content"]["parts"][0]["text"]
+
 async def call_gemini_chat(system_prompt: str, user_prompt: str) -> str:
     """Call Gemini API for chat responses"""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
@@ -761,6 +891,334 @@ async def chat_endpoint(
             ]
         )
 
+@app.post("/api/analyze-photo", response_model=FacialAnalysisResponse)
+async def analyze_photo(
+    photo: UploadFile = File(...),
+    user: Optional[dict] = Depends(get_current_user)
+):
+    """
+    Analyze facial photo for fatigue and fever indicators using Gemini Vision
+    """
+    try:
+        if not GEMINI_API_KEY:
+            raise HTTPException(status_code=500, detail="Photo analysis service not configured")
+        
+        # Validate file type
+        if not photo.content_type or not photo.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail="File must be an image")
+        
+        # Read and validate file size
+        photo_data = await photo.read()
+        if len(photo_data) > 10 * 1024 * 1024:  # 10MB limit
+            raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+        
+        user_info = f"user: {user.get('email')}" if user else "anonymous user"
+        logger.info(f"Processing photo analysis for {user_info}")
+        
+        # Convert image to base64
+        try:
+            # Open and potentially resize image
+            image = Image.open(io.BytesIO(photo_data))
+            
+            # Convert to RGB if necessary
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            
+            # Resize if too large (max 1024x1024 for API efficiency)
+            max_size = 1024
+            if image.width > max_size or image.height > max_size:
+                image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+            
+            # Convert back to bytes
+            img_byte_arr = io.BytesIO()
+            image.save(img_byte_arr, format='JPEG', quality=85)
+            img_byte_arr.seek(0)
+            
+            # Encode to base64
+            image_base64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
+            
+        except Exception as e:
+            logger.error(f"Image processing error: {e}")
+            raise HTTPException(status_code=400, detail="Invalid image file")
+        
+        # Create analysis prompt
+        analysis_prompt = """You are a medical AI assistant analyzing facial appearance for signs of fatigue and fever. 
+
+Please analyze this facial photo for:
+
+1. FATIGUE INDICATORS:
+   - Dark circles under eyes
+   - Droopy or heavy eyelids
+   - Pale or dull skin tone
+   - Overall tired appearance
+   - Lack of alertness in facial expression
+
+2. FEVER INDICATORS:
+   - Flushed or red cheeks
+   - Sweaty or shiny appearance
+   - Glassy or unfocused eyes
+   - Overall warm/heated appearance
+   - Signs of discomfort
+
+3. OVERALL HEALTH APPEARANCE:
+   - General wellness assessment
+   - Alertness level
+   - Skin condition
+   - Hydration signs
+
+Please respond with ONLY a valid JSON object:
+{
+    "fatigue_indicators": ["list of detected fatigue signs"],
+    "fever_indicators": ["list of detected fever signs"],
+    "overall_health_appearance": "description of general appearance",
+    "confidence_score": 0.75,
+    "recommendations": ["health recommendations based on appearance"]
+}
+
+Important: Base your assessment only on visible facial features. Do not make definitive medical diagnoses."""
+
+        # Call Gemini Vision API
+        try:
+            response = await call_gemini_vision_api(image_base64, analysis_prompt)
+            logger.info(f"Gemini Vision response: {response[:200]}...")
+            
+            # Parse JSON response
+            response_clean = response.strip()
+            if "```json" in response_clean:
+                response_clean = response_clean.split("```json")[1].split("```")[0]
+            elif "```" in response_clean:
+                response_clean = response_clean.split("```")[1].split("```")[0]
+            
+            analysis_result = json.loads(response_clean)
+            
+            # Create response object
+            facial_analysis = FacialAnalysisResponse(
+                fatigue_indicators=analysis_result.get("fatigue_indicators", []),
+                fever_indicators=analysis_result.get("fever_indicators", []),
+                overall_health_appearance=analysis_result.get("overall_health_appearance", "Unable to assess from photo"),
+                confidence_score=float(analysis_result.get("confidence_score", 0.5)),
+                recommendations=analysis_result.get("recommendations", ["Consult healthcare provider for professional assessment"])
+            )
+            
+            logger.info(f"Photo analysis completed with {len(facial_analysis.fatigue_indicators)} fatigue and {len(facial_analysis.fever_indicators)} fever indicators")
+            return facial_analysis
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parsing error: {e}")
+            # Return fallback response
+            return FacialAnalysisResponse(
+                fatigue_indicators=["Unable to analyze - please ensure good lighting and clear face view"],
+                fever_indicators=[],
+                overall_health_appearance="Photo analysis could not be completed. Please ensure good lighting and a clear view of your face.",
+                confidence_score=0.0,
+                recommendations=["Retake photo with better lighting", "Consult healthcare provider for assessment"]
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Photo analysis error: {e}")
+        raise HTTPException(status_code=500, detail="Photo analysis failed")
+
+@app.post("/api/triage-comprehensive", response_model=ComprehensiveTriageResponse)
+async def comprehensive_triage_assessment(
+    patient_data: str = Form(...),
+    photo: Optional[UploadFile] = File(None),
+    user: Optional[dict] = Depends(get_current_user)
+):
+    """
+    Comprehensive triage endpoint that combines symptom analysis with optional photo analysis
+    """
+    try:
+        # Parse patient data from form
+        try:
+            patient_info = PatientData.parse_raw(patient_data)
+        except Exception as e:
+            logger.error(f"Invalid patient data format: {e}")
+            raise HTTPException(status_code=400, detail="Invalid patient data format")
+        
+        user_info = f"user: {user.get('email')}" if user else "anonymous user"
+        logger.info(f"Processing comprehensive triage for {user_info}, {patient_info.age}y patient")
+        
+        # Step 1: Get initial symptom-based assessment
+        logger.info("Step 1: Analyzing symptoms...")
+        symptom_assessment = await get_ai_triage_assessment(patient_info)
+        
+        # Step 2: Analyze photo if provided
+        facial_analysis = None
+        if photo:
+            logger.info("Step 2: Analyzing facial photo...")
+            try:
+                # Validate file type
+                if not photo.content_type or not photo.content_type.startswith('image/'):
+                    logger.warning("Invalid photo file type, skipping photo analysis")
+                else:
+                    # Read and process photo
+                    photo_data = await photo.read()
+                    if len(photo_data) > 10 * 1024 * 1024:  # 10MB limit
+                        logger.warning("Photo too large, skipping photo analysis")
+                    else:
+                        # Process image and get analysis
+                        image = Image.open(io.BytesIO(photo_data))
+                        if image.mode != 'RGB':
+                            image = image.convert('RGB')
+                        
+                        # Resize if needed
+                        max_size = 1024
+                        if image.width > max_size or image.height > max_size:
+                            image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+                        
+                        # Convert to base64
+                        img_byte_arr = io.BytesIO()
+                        image.save(img_byte_arr, format='JPEG', quality=85)
+                        img_byte_arr.seek(0)
+                        image_base64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
+                        
+                        # Create analysis prompt
+                        analysis_prompt = """Analyze this facial photo for signs of fatigue and fever. Look for:
+                        
+FATIGUE INDICATORS: Dark circles, droopy eyelids, pale skin, tired appearance
+FEVER INDICATORS: Flushed cheeks, sweaty appearance, glassy eyes, heated look
+
+Respond with JSON:
+{
+    "fatigue_indicators": ["list of signs"],
+    "fever_indicators": ["list of signs"],
+    "overall_health_appearance": "description",
+    "confidence_score": 0.75,
+    "recommendations": ["health recommendations"]
+}"""
+                        
+                        # Call Gemini Vision API
+                        response = await call_gemini_vision_api(image_base64, analysis_prompt)
+                        
+                        # Parse response
+                        response_clean = response.strip()
+                        if "```json" in response_clean:
+                            response_clean = response_clean.split("```json")[1].split("```")[0]
+                        elif "```" in response_clean:
+                            response_clean = response_clean.split("```")[1].split("```")[0]
+                        
+                        analysis_result = json.loads(response_clean)
+                        
+                        facial_analysis = FacialAnalysisResponse(
+                            fatigue_indicators=analysis_result.get("fatigue_indicators", []),
+                            fever_indicators=analysis_result.get("fever_indicators", []),
+                            overall_health_appearance=analysis_result.get("overall_health_appearance", "Unable to assess"),
+                            confidence_score=float(analysis_result.get("confidence_score", 0.5)),
+                            recommendations=analysis_result.get("recommendations", [])
+                        )
+                        
+                        logger.info(f"Photo analysis completed: {len(facial_analysis.fatigue_indicators)} fatigue, {len(facial_analysis.fever_indicators)} fever indicators")
+                        
+            except Exception as e:
+                logger.warning(f"Photo analysis failed: {e}, continuing with symptom-only assessment")
+        
+        # Step 3: Combine both analyses for final assessment
+        logger.info("Step 3: Creating combined assessment...")
+        
+        # Create enhanced prompt that includes both symptom and visual data
+        system_prompt = create_system_prompt()
+        
+        # Build comprehensive prompt
+        symptoms_str = ", ".join(patient_info.symptoms) if patient_info.symptoms else "None reported"
+        history_str = patient_info.medical_history if patient_info.medical_history else "Not provided"
+        
+        photo_context = ""
+        if facial_analysis:
+            photo_context = f"""
+            
+FACIAL ANALYSIS RESULTS:
+- Fatigue indicators: {', '.join(facial_analysis.fatigue_indicators) if facial_analysis.fatigue_indicators else 'None detected'}
+- Fever indicators: {', '.join(facial_analysis.fever_indicators) if facial_analysis.fever_indicators else 'None detected'}
+- Overall appearance: {facial_analysis.overall_health_appearance}
+- Photo analysis confidence: {facial_analysis.confidence_score:.2f}
+"""
+        
+        combined_prompt = f"""Please provide a comprehensive assessment combining symptom data and visual analysis:
+
+PATIENT PRESENTATION:
+- Age: {patient_info.age} years
+- Temperature: {patient_info.temperature}°F
+- Fever duration: {patient_info.duration_hours} hours
+- Symptoms: {symptoms_str}
+- Medical history: {history_str}{photo_context}
+
+INITIAL SYMPTOM-BASED ASSESSMENT:
+- Severity: {symptom_assessment.severity}
+- Diagnoses: {', '.join(symptom_assessment.diagnosis_suggestions)}
+- Clinical reasoning: {symptom_assessment.clinical_explanation}
+
+Please provide a FINAL COMPREHENSIVE assessment that considers both symptom data and visual indicators (if available).
+
+Respond with JSON:
+{{
+    "severity": "LOW|MEDIUM|HIGH|CRITICAL",
+    "diagnosis_suggestions": ["Final diagnosis suggestions"],
+    "recommended_action": "Final recommendation",
+    "clinical_explanation": "Final clinical reasoning",
+    "red_flags": ["Warning signs to monitor"],
+    "confidence_score": 0.85,
+    "combined_reasoning": "Explanation of how visual and symptom data were combined"
+}}"""
+        
+        # Get final combined assessment
+        try:
+            response_content = await call_gemini_api(system_prompt, combined_prompt)
+            
+            # Parse response
+            response_clean = response_content.strip()
+            if "```json" in response_clean:
+                response_clean = response_clean.split("```json")[1].split("```")[0]
+            elif "```" in response_clean:
+                response_clean = response_clean.split("```")[1].split("```")[0]
+            
+            final_assessment = json.loads(response_clean)
+            
+            # Create comprehensive response
+            comprehensive_response = ComprehensiveTriageResponse(
+                severity=final_assessment.get("severity", symptom_assessment.severity),
+                diagnosis_suggestions=final_assessment.get("diagnosis_suggestions", symptom_assessment.diagnosis_suggestions),
+                recommended_action=final_assessment.get("recommended_action", symptom_assessment.recommended_action),
+                clinical_explanation=final_assessment.get("clinical_explanation", symptom_assessment.clinical_explanation),
+                red_flags=final_assessment.get("red_flags", symptom_assessment.red_flags),
+                confidence_score=float(final_assessment.get("confidence_score", symptom_assessment.confidence_score)),
+                facial_analysis=facial_analysis,
+                combined_reasoning=final_assessment.get("combined_reasoning", "Assessment based on symptom analysis" + (" and facial indicators" if facial_analysis else ""))
+            )
+            
+            logger.info(f"Comprehensive assessment completed: {comprehensive_response.severity} severity")
+            return comprehensive_response
+            
+        except Exception as e:
+            logger.warning(f"Combined assessment failed: {e}, using symptom assessment")
+            # Fallback to symptom assessment
+            return ComprehensiveTriageResponse(
+                severity=symptom_assessment.severity,
+                diagnosis_suggestions=symptom_assessment.diagnosis_suggestions,
+                recommended_action=symptom_assessment.recommended_action,
+                clinical_explanation=symptom_assessment.clinical_explanation,
+                red_flags=symptom_assessment.red_flags,
+                confidence_score=symptom_assessment.confidence_score,
+                facial_analysis=facial_analysis,
+                combined_reasoning="Assessment based on symptom analysis" + (" and facial visual indicators" if facial_analysis else "")
+            )
+        
+    except Exception as e:
+        logger.error(f"Comprehensive triage error: {e}")
+        # Return fallback response
+        fallback = await get_fallback_response(patient_info)
+        return ComprehensiveTriageResponse(
+            severity=fallback.severity,
+            diagnosis_suggestions=fallback.diagnosis_suggestions,
+            recommended_action=fallback.recommended_action,
+            clinical_explanation=fallback.clinical_explanation,
+            red_flags=fallback.red_flags,
+            confidence_score=fallback.confidence_score,
+            facial_analysis=facial_analysis,
+            combined_reasoning="Fallback assessment due to processing error"
+        )
+
 @app.get("/")
 async def root():
     """Root endpoint with basic information"""
@@ -770,7 +1228,9 @@ async def root():
         "endpoints": {
             "health": "/api/health",
             "triage": "/api/triage (POST)",
-            "chat": "/api/chat (POST)"
+            "triage-comprehensive": "/api/triage-comprehensive (POST - with optional photo)",
+            "chat": "/api/chat (POST)",
+            "analyze-photo": "/api/analyze-photo (POST)"
         },
         "docs": "/docs"
     }

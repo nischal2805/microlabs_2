@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useAuth } from "@/contexts/AuthContext";
+// import { useAuth } from "@/contexts/AuthContext";
 import {
 	PatientData,
 	TriageResponse,
+	ComprehensiveTriageResponse,
 	submitTriageAssessment,
+	submitComprehensiveTriageAssessment,
 	APIError,
 } from "@/lib/api";
 import SymptomForm from "@/components/SymptomForm";
@@ -18,24 +20,42 @@ import UserProfile from "@/components/UserProfile";
 import AuthForm from "@/components/AuthForm";
 
 export default function Home() {
-	const { user, userProfile, loading: authLoading, logout } = useAuth();
+	// Temporarily bypass Firebase auth to test core functionality
+	const user = { uid: "demo-user", email: "demo@example.com", displayName: "Demo User" }; // Mock user for testing
+	const userProfile = { name: "Demo User", email: "demo@example.com" };
+	const authLoading = false;
+	const logout = () => console.log("Demo logout");
 	const [currentStep, setCurrentStep] = useState<
 		"form" | "results" | "dashboard"
 	>("form");
 	const [loading, setLoading] = useState(false);
-	const [results, setResults] = useState<TriageResponse | null>(null);
+	const [results, setResults] = useState<ComprehensiveTriageResponse | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [demoData, setDemoData] = useState<Partial<PatientData> | null>(null);
 	const [showChatbot, setShowChatbot] = useState(false);
 	const [showProfileSetup, setShowProfileSetup] = useState(false);
 
-	const handleFormSubmit = async (patientData: PatientData) => {
+	const handleFormSubmit = async (patientData: PatientData, photo?: File) => {
 		setLoading(true);
 		setError(null);
 
 		try {
-			const assessment = await submitTriageAssessment(patientData);
-			setResults(assessment);
+			// Use comprehensive assessment if photo is provided, otherwise use regular assessment
+			if (photo) {
+				console.log('Using comprehensive assessment with photo');
+				const assessment = await submitComprehensiveTriageAssessment(patientData, photo);
+				setResults(assessment);
+			} else {
+				console.log('Using regular assessment without photo');
+				const assessment = await submitTriageAssessment(patientData);
+				// Convert regular response to comprehensive format
+				const comprehensiveAssessment: ComprehensiveTriageResponse = {
+					...assessment,
+					facial_analysis: undefined,
+					combined_reasoning: "Assessment based on symptom analysis only"
+				};
+				setResults(comprehensiveAssessment);
+			}
 			setCurrentStep("results");
 		} catch (err) {
 			if (err instanceof APIError) {

@@ -255,7 +255,7 @@ export default function PhotoUpload({ onAnalysisComplete, onPhotoCapture, disabl
 
                 {/* Bottom tips */}
                 <div className="absolute bottom-4 left-4 right-4 bg-black bg-opacity-70 text-white text-xs p-2 rounded text-center">
-                  💡 Tips: Remove glasses, look straight, avoid shadows
+                  Tips: Remove glasses, look straight, avoid shadows
                 </div>
               </div>
             </div>
@@ -338,13 +338,13 @@ export default function PhotoUpload({ onAnalysisComplete, onPhotoCapture, disabl
         </div>
       )}
 
-      {/* Enhanced Preview and Analysis Results */}
-      {preview && analysis && (
-        <div className="bg-gradient-to-br from-green-50 to-emerald-100 rounded-xl p-6 space-y-6 border border-green-200">
+      {/* Simple Photo Confirmation (No Analysis Details) */}
+      {preview && (
+        <div className="bg-gradient-to-br from-green-50 to-emerald-100 rounded-xl p-6 space-y-4 border border-green-200">
           <div className="flex justify-between items-center">
             <div className="flex items-center space-x-2">
-              <span className="text-2xl">🎯</span>
-              <h4 className="font-bold text-gray-800 text-lg">AI Analysis Complete</h4>
+              <span className="text-2xl">📸</span>
+              <h4 className="font-bold text-gray-800 text-lg">Photo Ready for Analysis</h4>
             </div>
             <button
               type="button"
@@ -355,13 +355,13 @@ export default function PhotoUpload({ onAnalysisComplete, onPhotoCapture, disabl
             </button>
           </div>
 
-          {/* Enhanced Photo Preview */}
+          {/* Simple Photo Preview */}
           <div className="text-center">
             <div className="relative inline-block">
               <img
                 src={preview}
-                alt="Analyzed photo"
-                className="max-w-64 max-h-64 mx-auto rounded-2xl shadow-2xl border-4 border-white"
+                alt="Photo ready for analysis"
+                className="max-w-48 max-h-48 mx-auto rounded-2xl shadow-lg border-4 border-white"
               />
               <div className="absolute -top-2 -right-2 bg-green-500 text-white rounded-full p-2 shadow-lg">
                 <span className="text-sm font-bold">✓</span>
@@ -369,102 +369,22 @@ export default function PhotoUpload({ onAnalysisComplete, onPhotoCapture, disabl
             </div>
           </div>
 
-          {/* Enhanced Analysis Results */}
-          <div className="space-y-6">
-            {/* Confidence Score with visual indicator */}
-            <div className="bg-white rounded-lg p-4 shadow-md">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-bold text-gray-700 flex items-center space-x-1">
-                  <span>🎯</span>
-                  <span>AI Confidence:</span>
-                </span>
-                <span className="text-lg font-bold text-blue-600">
-                  {Math.round(analysis.confidence_score * 100)}%
-                </span>
+          {/* Simple Confirmation Message */}
+          <div className="text-center">
+            <div className="bg-white rounded-lg p-4 shadow-sm">
+              <div className="flex items-center justify-center space-x-2 mb-2">
+                <span className="text-sm font-bold text-gray-700">Photo Captured Successfully</span>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-3">
-                <div 
-                  className="bg-gradient-to-r from-blue-500 to-green-500 h-3 rounded-full transition-all duration-500"
-                  style={{ width: `${Math.round(analysis.confidence_score * 100)}%` }}
-                ></div>
+              <p className="text-sm text-gray-600">
+                Your photo will be analyzed along with your symptoms for a comprehensive assessment.
+              </p>
+              <div className="mt-2 text-xs text-gray-500">
+                Photo processed securely and not stored permanently
               </div>
             </div>
-
-            {/* Fatigue Indicators */}
-            {analysis.fatigue_indicators.length > 0 && (
-              <div className="bg-white rounded-lg p-4 shadow-md">
-                <div className="flex items-center space-x-2 mb-3">
-                  <span className="text-lg">😴</span>
-                  <span className="text-sm font-bold text-gray-700">Fatigue Indicators:</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {analysis.fatigue_indicators.map((indicator: string, index: number) => (
-                    <div
-                      key={index}
-                      className="flex items-center space-x-2 bg-yellow-50 border border-yellow-200 rounded-lg p-2"
-                    >
-                      <span className="w-2 h-2 bg-yellow-500 rounded-full"></span>
-                      <span className="text-sm text-yellow-800 font-medium">{indicator}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Fever Indicators */}
-            {analysis.fever_indicators.length > 0 && (
-              <div className="bg-white rounded-lg p-4 shadow-md">
-                <div className="flex items-center space-x-2 mb-3">
-                  <span className="text-lg">🌡️</span>
-                  <span className="text-sm font-bold text-gray-700">Fever Indicators:</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {analysis.fever_indicators.map((indicator: string, index: number) => (
-                    <div
-                      key={index}
-                      className="flex items-center space-x-2 bg-red-50 border border-red-200 rounded-lg p-2"
-                    >
-                      <span className="w-2 h-2 bg-red-500 rounded-full"></span>
-                      <span className="text-sm text-red-800 font-medium">{indicator}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Overall Health Appearance */}
-            <div className="bg-white rounded-lg p-4 shadow-md">
-              <div className="flex items-center space-x-2 mb-3">
-                <span className="text-lg">👁️</span>
-                <span className="text-sm font-bold text-gray-700">Overall Assessment:</span>
-              </div>
-              <div className="bg-gray-50 rounded-lg p-3 border-l-4 border-blue-500">
-                <p className="text-sm text-gray-700 leading-relaxed">
-                  {analysis.overall_health_appearance}
-                </p>
-              </div>
-            </div>
-
-            {/* AI Recommendations */}
-            {analysis.recommendations.length > 0 && (
-              <div className="bg-white rounded-lg p-4 shadow-md">
-                <div className="flex items-center space-x-2 mb-3">
-                  <span className="text-lg">💡</span>
-                  <span className="text-sm font-bold text-gray-700">AI Recommendations:</span>
-                </div>
-                <div className="space-y-3">
-                  {analysis.recommendations.map((rec: string, index: number) => (
-                    <div key={index} className="flex items-start space-x-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
-                      <div className="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold mt-0.5">
-                        {index + 1}
-                      </div>
-                      <p className="text-sm text-blue-800 leading-relaxed flex-1">{rec}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
+
+
         </div>
       )}
 
@@ -477,19 +397,17 @@ export default function PhotoUpload({ onAnalysisComplete, onPhotoCapture, disabl
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-600">
             <div className="flex items-center space-x-2">
-              <span>💡</span>
+
               <span>Good lighting recommended</span>
             </div>
             <div className="flex items-center space-x-2">
-              <span>👁️</span>
+
               <span>Clear face view, front-facing</span>
             </div>
             <div className="flex items-center space-x-2">
-              <span>🚫</span>
               <span>Remove glasses/obstructions</span>
             </div>
             <div className="flex items-center space-x-2">
-              <span>🔒</span>
               <span>Secure processing, not stored</span>
             </div>
           </div>

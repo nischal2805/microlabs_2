@@ -45,6 +45,12 @@ export interface ComprehensiveTriageResponse {
 	// Photo analysis results
 	facial_analysis?: FacialAnalysisResponse;
 	
+	// Location and time context
+	location_context?: string;
+	seasonal_context?: string;
+	likely_fever_types: {type: string, likelihood: number}[];
+	home_remedies: string[];
+	
 	// Combined assessment
 	combined_reasoning: string;
 }
@@ -179,7 +185,8 @@ export async function analyzePhoto(file: File): Promise<FacialAnalysisResponse> 
 
 export async function submitComprehensiveTriageAssessment(
 	patientData: PatientData,
-	photo?: File
+	photo?: File,
+	location?: {latitude: number, longitude: number}
 ): Promise<ComprehensiveTriageResponse> {
 	const formData = new FormData();
 	
@@ -190,6 +197,15 @@ export async function submitComprehensiveTriageAssessment(
 	if (photo) {
 		formData.append('photo', photo);
 	}
+	
+	// Add location if provided
+	if (location) {
+		formData.append('latitude', location.latitude.toString());
+		formData.append('longitude', location.longitude.toString());
+	}
+	
+	// Add current time
+	formData.append('assessment_time', new Date().toISOString());
 
 	// Get Firebase auth token if user is logged in
 	let token: string | null = null;

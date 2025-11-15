@@ -35,7 +35,6 @@ export default function ResultsDisplay({ results, onStartNewAssessment }: Result
   const [showExplanation, setShowExplanation] = useState(false);
   
   const config = severityConfig[results.severity];
-  const confidencePercentage = Math.round(results.confidence_score * 100);
 
   return (
     <div className="space-y-6">
@@ -57,7 +56,7 @@ export default function ResultsDisplay({ results, onStartNewAssessment }: Result
         <div className={`inline-flex items-center px-8 py-4 rounded-lg shadow-lg ${config.bgColor} ${config.textColor}`}>
           <div>
             <div className="text-2xl font-bold">{config.title}</div>
-            <div className="text-sm opacity-90">Confidence: {confidencePercentage}%</div>
+
           </div>
         </div>
       </div>
@@ -86,6 +85,58 @@ export default function ResultsDisplay({ results, onStartNewAssessment }: Result
           ))}
         </ul>
       </div>
+
+      {/* Location-Based Fever Analysis */}
+      {results.likely_fever_types && results.likely_fever_types.length > 0 && (
+        <div className="bg-blue-50 border-l-4 border-blue-500 p-6 rounded-md">
+          <h3 className="text-lg font-semibold text-blue-800 mb-4">
+            Most Likely Fever Types in Your Area
+          </h3>
+          <div className="space-y-3">
+            {results.likely_fever_types.map((fever, index) => (
+              <div key={index} className="flex items-center justify-between bg-white rounded-lg p-3 shadow-sm">
+                <div className="flex items-center space-x-3">
+                  <div className={`w-3 h-3 rounded-full ${index === 0 ? 'bg-red-500' : index === 1 ? 'bg-orange-500' : 'bg-yellow-500'}`}></div>
+                  <span className="font-medium text-gray-800">{fever.type}</span>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm font-semibold text-blue-600">
+                    {Math.round(fever.likelihood * 100)}% likely
+                  </div>
+                  <div className="w-20 bg-gray-200 rounded-full h-2 mt-1">
+                    <div 
+                      className="bg-blue-500 h-2 rounded-full transition-all duration-500"
+                      style={{ width: `${Math.round(fever.likelihood * 100)}%` }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {results.location_context && (
+            <div className="mt-4 p-3 bg-blue-100 rounded-lg">
+              <p className="text-sm text-blue-800">{results.location_context}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Home Remedies */}
+      {results.home_remedies && results.home_remedies.length > 0 && (
+        <div className="bg-green-50 border-l-4 border-green-500 p-6 rounded-md">
+          <h3 className="text-lg font-semibold text-green-800 mb-4">
+            Recommended Home Care (Low-Risk Cases Only)
+          </h3>
+          <ul className="space-y-2">
+            {results.home_remedies.map((remedy, index) => (
+              <li key={index} className="flex items-start">
+                <span className="text-green-600 mr-2 mt-1">•</span>
+                <span className="text-green-800 text-sm">{remedy}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Red Flags */}
       {results.red_flags.length > 0 && (
@@ -141,34 +192,15 @@ export default function ResultsDisplay({ results, onStartNewAssessment }: Result
       {results.facial_analysis && (
         <div className="bg-gradient-to-br from-purple-50 to-indigo-100 rounded-xl p-6 border border-purple-200">
           <div className="flex items-center space-x-2 mb-4">
-            <span className="text-2xl">📸</span>
+            
             <h3 className="text-xl font-bold text-purple-900">AI Facial Analysis Results</h3>
           </div>
 
           <div className="space-y-4">
-            {/* Confidence Score */}
-            <div className="bg-white rounded-lg p-4 shadow-sm">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-bold text-gray-700 flex items-center space-x-1">
-                  <span>🎯</span>
-                  <span>Analysis Confidence:</span>
-                </span>
-                <span className="text-lg font-bold text-purple-600">
-                  {Math.round(results.facial_analysis.confidence_score * 100)}%
-                </span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div 
-                  className="bg-gradient-to-r from-purple-500 to-blue-500 h-2 rounded-full transition-all duration-500"
-                  style={{ width: `${Math.round(results.facial_analysis.confidence_score * 100)}%` }}
-                ></div>
-              </div>
-            </div>
-
             {/* Overall Appearance */}
             <div className="bg-white rounded-lg p-4 shadow-sm">
               <div className="flex items-center space-x-2 mb-3">
-                <span className="text-lg">👁️</span>
+
                 <span className="text-sm font-bold text-gray-700">Overall Health Appearance:</span>
               </div>
               <div className="bg-gray-50 rounded-lg p-3 border-l-4 border-purple-500">
@@ -203,7 +235,7 @@ export default function ResultsDisplay({ results, onStartNewAssessment }: Result
             {results.facial_analysis.fever_indicators.length > 0 && (
               <div className="bg-white rounded-lg p-4 shadow-sm">
                 <div className="flex items-center space-x-2 mb-3">
-                  <span className="text-lg">🌡️</span>
+
                   <span className="text-sm font-bold text-gray-700">Detected Fever Signs:</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -224,7 +256,7 @@ export default function ResultsDisplay({ results, onStartNewAssessment }: Result
             {results.facial_analysis.recommendations.length > 0 && (
               <div className="bg-white rounded-lg p-4 shadow-sm">
                 <div className="flex items-center space-x-2 mb-3">
-                  <span className="text-lg">💡</span>
+
                   <span className="text-sm font-bold text-gray-700">Photo-Based Recommendations:</span>
                 </div>
                 <div className="space-y-2">
@@ -243,14 +275,59 @@ export default function ResultsDisplay({ results, onStartNewAssessment }: Result
             {/* Combined Reasoning */}
             <div className="bg-white rounded-lg p-4 shadow-sm">
               <div className="flex items-center space-x-2 mb-3">
-                <span className="text-lg">🤖</span>
                 <span className="text-sm font-bold text-gray-700">AI Combined Assessment:</span>
               </div>
-              <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-3 border-l-4 border-purple-500">
+              <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-3 border-l-4 border-blue-500">
                 <p className="text-sm text-gray-700 leading-relaxed">
                   {results.combined_reasoning}
                 </p>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Location Context */}
+      {results.location_context && (
+        <div className="bg-gradient-to-br from-green-50 to-emerald-100 rounded-xl p-6 border border-brown-200 mt-6">
+          <div className="text-center mb-4">
+            <div className="flex items-center justify-center space-x-2 text-brown-400">
+              <span className="font-bold text-lg">Location-Based Health Insights</span>
+            </div>
+          </div>
+          
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <div className="flex items-center space-x-2 mb-3">
+
+              <span className="text-sm font-bold text-gray-700">Local Health Context:</span>
+            </div>
+            <div className="bg-green-50 rounded-lg p-3 border-l-4 border-green-500">
+              <p className="text-sm text-gray-700 leading-relaxed">
+                {results.location_context}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Seasonal/Time Context */}
+      {results.seasonal_context && (
+        <div className="bg-gradient-to-br from-yellow-50 to-orange-100 rounded-xl p-6 border border-yellow-200 mt-6">
+          <div className="text-center mb-4">
+            <div className="flex items-center justify-center space-x-2 text-orange-600">
+              <span className="font-bold text-lg">Timing & Seasonal Insights</span>
+            </div>
+          </div>
+          
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <div className="flex items-center space-x-2 mb-3">
+
+              <span className="text-sm font-bold text-gray-700">Time-Based Health Context:</span>
+            </div>
+            <div className="bg-yellow-50 rounded-lg p-3 border-l-4 border-yellow-500">
+              <p className="text-sm text-gray-700 leading-relaxed">
+                {results.seasonal_context}
+              </p>
             </div>
           </div>
         </div>

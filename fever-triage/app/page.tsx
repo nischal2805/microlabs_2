@@ -34,28 +34,48 @@ export default function Home() {
 	const [demoData, setDemoData] = useState<Partial<PatientData> | null>(null);
 	const [showChatbot, setShowChatbot] = useState(false);
 	const [showProfileSetup, setShowProfileSetup] = useState(false);
+	const [userLocation, setUserLocation] = useState<{latitude: number, longitude: number} | null>(null);
+	const [locationError, setLocationError] = useState<string | null>(null);
+
+	// Get user location on component mount
+	useEffect(() => {
+		if (navigator.geolocation) {
+			navigator.geolocation.getCurrentPosition(
+				(position) => {
+					setUserLocation({
+						latitude: position.coords.latitude,
+						longitude: position.coords.longitude
+					});
+					console.log('Location obtained:', position.coords.latitude, position.coords.longitude);
+				},
+				(error) => {
+					console.warn('Location access denied or failed:', error.message);
+					setLocationError('Location access not available - continuing without location context');
+				},
+				{
+					enableHighAccuracy: false,
+					timeout: 10000,
+					maximumAge: 300000 // 5 minutes
+				}
+			);
+		} else {
+			setLocationError('Geolocation not supported by this browser');
+		}
+	}, []);
 
 	const handleFormSubmit = async (patientData: PatientData, photo?: File) => {
 		setLoading(true);
 		setError(null);
 
 		try {
-			// Use comprehensive assessment if photo is provided, otherwise use regular assessment
-			if (photo) {
-				console.log('Using comprehensive assessment with photo');
-				const assessment = await submitComprehensiveTriageAssessment(patientData, photo);
-				setResults(assessment);
-			} else {
-				console.log('Using regular assessment without photo');
-				const assessment = await submitTriageAssessment(patientData);
-				// Convert regular response to comprehensive format
-				const comprehensiveAssessment: ComprehensiveTriageResponse = {
-					...assessment,
-					facial_analysis: undefined,
-					combined_reasoning: "Assessment based on symptom analysis only"
-				};
-				setResults(comprehensiveAssessment);
-			}
+			// Always use comprehensive assessment to include location and time context
+			console.log('Using comprehensive assessment with location context');
+			const assessment = await submitComprehensiveTriageAssessment(
+				patientData, 
+				photo, 
+				userLocation || undefined
+			);
+			setResults(assessment);
 			setCurrentStep("results");
 		} catch (err) {
 			if (err instanceof APIError) {
